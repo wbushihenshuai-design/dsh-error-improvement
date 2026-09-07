@@ -14,12 +14,30 @@ export interface ErrorLesson {
     confirmed?: boolean;
     enabled?: boolean;
 }
+export interface CompactionSettings {
+    enabled?: boolean;
+    /** Fraction of context window at which compaction triggers (0.0–1.0). */
+    thresholdRatio?: number;
+    /** Fraction of context window retained as verbatim tail after compaction. */
+    retainRatio?: number;
+    /** Provider for the summarization model. Empty = use current conversation model. */
+    summarizationProvider?: string;
+    /** Model for the summarization. Empty = use current conversation model. */
+    summarizationModel?: string;
+    /** Provider to retry when the primary summarization route fails. Empty = conversation route. */
+    fallbackSummarizationProvider?: string;
+    /** Model to retry when the primary summarization route fails. Empty = conversation route. */
+    fallbackSummarizationModel?: string;
+    /** Max output tokens for the summarization call. */
+    maxTokens?: number;
+}
 export interface ErrorImprovementSettings {
     enabled?: boolean;
     mode?: "assist" | "strict";
     maxLessons?: number;
     maxChars?: number;
     lessons?: ErrorLesson[];
+    compaction?: CompactionSettings;
 }
 /** Built-in lessons that apply to every installation. */
 export declare const builtinLessons: readonly ErrorLesson[];
@@ -48,6 +66,25 @@ export declare const ErrorImprovementSettingsSchema: z<Schemastery.ObjectS<{
         confirmed: z<boolean, boolean>;
         enabled: z<boolean, boolean>;
     }>[]>;
+    compaction: z<Schemastery.ObjectS<{
+        enabled: z<boolean, boolean>;
+        thresholdRatio: z<number, number>;
+        retainRatio: z<number, number>;
+        summarizationProvider: z<string, string>;
+        summarizationModel: z<string, string>;
+        fallbackSummarizationProvider: z<string, string>;
+        fallbackSummarizationModel: z<string, string>;
+        maxTokens: z<number, number>;
+    }>, Schemastery.ObjectT<{
+        enabled: z<boolean, boolean>;
+        thresholdRatio: z<number, number>;
+        retainRatio: z<number, number>;
+        summarizationProvider: z<string, string>;
+        summarizationModel: z<string, string>;
+        fallbackSummarizationProvider: z<string, string>;
+        fallbackSummarizationModel: z<string, string>;
+        maxTokens: z<number, number>;
+    }>>;
 }>, Schemastery.ObjectT<{
     enabled: z<boolean, boolean>;
     mode: z<"assist" | "strict", "assist" | "strict">;
@@ -72,6 +109,25 @@ export declare const ErrorImprovementSettingsSchema: z<Schemastery.ObjectS<{
         confirmed: z<boolean, boolean>;
         enabled: z<boolean, boolean>;
     }>[]>;
+    compaction: z<Schemastery.ObjectS<{
+        enabled: z<boolean, boolean>;
+        thresholdRatio: z<number, number>;
+        retainRatio: z<number, number>;
+        summarizationProvider: z<string, string>;
+        summarizationModel: z<string, string>;
+        fallbackSummarizationProvider: z<string, string>;
+        fallbackSummarizationModel: z<string, string>;
+        maxTokens: z<number, number>;
+    }>, Schemastery.ObjectT<{
+        enabled: z<boolean, boolean>;
+        thresholdRatio: z<number, number>;
+        retainRatio: z<number, number>;
+        summarizationProvider: z<string, string>;
+        summarizationModel: z<string, string>;
+        fallbackSummarizationProvider: z<string, string>;
+        fallbackSummarizationModel: z<string, string>;
+        maxTokens: z<number, number>;
+    }>>;
 }>>;
 export declare function relevanceScore(lesson: ErrorLesson, query: string): number;
 export declare function selectLessons(settings: ErrorImprovementSettings, query: string): ErrorLesson[];

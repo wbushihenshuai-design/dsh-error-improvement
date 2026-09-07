@@ -3,6 +3,7 @@
 import type { Context } from "@deepseek-ai/cordis";
 import type { PreStepDecision } from "@deepseek-ai/dsh-agent";
 
+import { ConfigurableCompactionEngine } from "./compaction.js";
 import {
 	builtinLessons,
 	defaultSettings,
@@ -14,7 +15,14 @@ import {
 } from "./lessons.js";
 
 export const name = PLUGIN_NAME;
-export const inject = ["agents", "settings"];
+export const inject = [
+	"agents",
+	"settings",
+	"compaction",
+	"llm",
+	"tokenMeter",
+	"sessions",
+];
 export { ErrorImprovementSettingsSchema };
 export type { ErrorImprovementSettings };
 
@@ -91,7 +99,19 @@ export function apply(ctx: Context): void {
 		{ prepend: true },
 	);
 
+	// Register the configurable compaction engine (overrides dsh-compaction-basic).
+	ctx.inject(["compaction"], (compactionCtx) => {
+		try {
+			const engine = new ConfigurableCompactionEngine(ctx, currentSettings);
+			(compactionCtx as unknown as { compaction: unknown }).compaction = engine;
+		} catch (error) {
+			ctx.logger.warn(
+				`${PLUGIN_NAME}: compaction engine registration failed: ${String(error)}`,
+			);
+		}
+	});
+
 	ctx.logger.info(
-		`${PLUGIN_NAME}: active; settings namespace=${SETTINGS_NAMESPACE}`,
+		`${PLUGIN_NAME}: active; settings namespace=${SETTINGS_NAMESPACE}; compaction=on`,
 	);
 }

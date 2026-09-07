@@ -22,12 +22,31 @@ export interface ErrorLesson {
 	enabled?: boolean;
 }
 
+export interface CompactionSettings {
+	enabled?: boolean;
+	/** Fraction of context window at which compaction triggers (0.0–1.0). */
+	thresholdRatio?: number;
+	/** Fraction of context window retained as verbatim tail after compaction. */
+	retainRatio?: number;
+	/** Provider for the summarization model. Empty = use current conversation model. */
+	summarizationProvider?: string;
+	/** Model for the summarization. Empty = use current conversation model. */
+	summarizationModel?: string;
+	/** Provider to retry when the primary summarization route fails. Empty = conversation route. */
+	fallbackSummarizationProvider?: string;
+	/** Model to retry when the primary summarization route fails. Empty = conversation route. */
+	fallbackSummarizationModel?: string;
+	/** Max output tokens for the summarization call. */
+	maxTokens?: number;
+}
+
 export interface ErrorImprovementSettings {
 	enabled?: boolean;
 	mode?: "assist" | "strict";
 	maxLessons?: number;
 	maxChars?: number;
 	lessons?: ErrorLesson[];
+	compaction?: CompactionSettings;
 }
 
 /** Built-in lessons that apply to every installation. */
@@ -53,6 +72,16 @@ export const defaultSettings: Readonly<Required<ErrorImprovementSettings>> =
 		maxLessons: 5,
 		maxChars: 6000,
 		lessons: [...builtinLessons],
+		compaction: {
+			enabled: true,
+			thresholdRatio: 0.8,
+			retainRatio: 0.16,
+			summarizationProvider: "",
+			summarizationModel: "",
+			fallbackSummarizationProvider: "",
+			fallbackSummarizationModel: "",
+			maxTokens: 8192,
+		},
 	});
 
 export const ErrorImprovementSettingsSchema = z.object({
@@ -75,6 +104,27 @@ export const ErrorImprovementSettingsSchema = z.object({
 		)
 		.max(200)
 		.default([]),
+	compaction: z
+		.object({
+			enabled: z.boolean().default(true),
+			thresholdRatio: z.number().min(0.1).max(0.99).default(0.8),
+			retainRatio: z.number().min(0.02).max(0.5).default(0.16),
+			summarizationProvider: z.string().max(200).default(""),
+			summarizationModel: z.string().max(200).default(""),
+			fallbackSummarizationProvider: z.string().max(200).default(""),
+			fallbackSummarizationModel: z.string().max(200).default(""),
+			maxTokens: z.number().min(256).max(65536).default(8192),
+		})
+		.default({
+			enabled: true,
+			thresholdRatio: 0.8,
+			retainRatio: 0.16,
+			summarizationProvider: "",
+			summarizationModel: "",
+			fallbackSummarizationProvider: "",
+			fallbackSummarizationModel: "",
+			maxTokens: 8192,
+		}),
 });
 
 const OPEN = "<error_improvement_lessons>";

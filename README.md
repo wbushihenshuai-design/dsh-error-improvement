@@ -39,6 +39,19 @@ It is intentionally independent from EverOS, memory services, databases, browser
 | `maxChars` | `6000` | Maximum complete lesson block, clamped to 500–50000 characters. |
 | `lessons[]` | `[]` | User-managed lesson records. |
 
+### Context compaction
+
+| Field | Default | Meaning |
+| --- | ---: | --- |
+| `compaction.enabled` | `true` | Enables automatic pre-step pressure compaction and context-overflow recovery. |
+| `compaction.thresholdRatio` | `0.8` | Start normal compaction once the active conversation route reaches this fraction of its advertised context window. |
+| `compaction.retainRatio` | `0.16` | Recent conversation fraction retained verbatim; it must be lower than `thresholdRatio`. |
+| `compaction.summarizationProvider` / `summarizationModel` | empty | Primary summary route. Leave both empty to use the active conversation route. The pair must be complete or both blank. |
+| `compaction.fallbackSummarizationProvider` / `fallbackSummarizationModel` | empty | Explicit fallback summary route when the primary call fails (for example, exhausted balance or authentication/provider failure). The pair must be complete or both blank. |
+| `compaction.maxTokens` | `8192` | Maximum summary output tokens. |
+
+When the primary route is configured but its summary call fails, the plugin tries the explicit fallback route once. If no explicit fallback is set, it retries using the current conversation route when that is different. It never chooses an arbitrary provider/model: a route must already be known to DSH, so recovery stays predictable and reproducible. The upstream DSH engine records the normal durable transaction (`compaction/start` → summary → checkpoint replacement → `compaction/end`) and then retries a context-overflow request only after the replacement was committed.
+
 A lesson contains:
 
 ```json

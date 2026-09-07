@@ -204,6 +204,28 @@ test("edits and duplicate saves are blocked while a save is in flight", async ()
 	assert.equal(controller.getState().dirty, false);
 });
 
+test("compaction normalization supplies primary and fallback route defaults", async () => {
+	const { normalize } = (await loadPlugin()).__test;
+	const value = normalize({
+		compaction: {
+			summarizationProvider: "primary",
+			summarizationModel: "summary-v1",
+			fallbackSummarizationProvider: "fallback",
+			fallbackSummarizationModel: "summary-v2",
+		},
+	});
+	assert.deepEqual(JSON.parse(JSON.stringify(value.compaction)), {
+		enabled: true,
+		thresholdRatio: 0.8,
+		retainRatio: 0.16,
+		summarizationProvider: "primary",
+		summarizationModel: "summary-v1",
+		fallbackSummarizationProvider: "fallback",
+		fallbackSummarizationModel: "summary-v2",
+		maxTokens: 8192,
+	});
+});
+
 test("normalization assigns unique deterministic React keys", async () => {
 	const { normalize } = (await loadPlugin()).__test;
 	const value = normalize({

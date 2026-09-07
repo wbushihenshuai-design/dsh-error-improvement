@@ -39,6 +39,19 @@
 | `maxChars` | `6000` | 最大完整教训块，限制在 500–50000 字符。 |
 | `lessons[]` | `[]` | 用户管理的教训记录。 |
 
+### 上下文压缩
+
+| 字段 | 默认值 | 含义 |
+| --- | ---: | --- |
+| `compaction.enabled` | `true` | 启用每步前的常规压缩和上下文溢出恢复。 |
+| `compaction.thresholdRatio` | `0.8` | 活动对话路由达到其声明上下文窗口的该比例时，开始常规压缩。 |
+| `compaction.retainRatio` | `0.16` | 压缩后原样保留的最近对话比例；必须严格小于 `thresholdRatio`。 |
+| `compaction.summarizationProvider` / `summarizationModel` | 留空 | 主摘要路由。两个字段同时留空时使用当前对话路由；填写时必须是完整的一对。 |
+| `compaction.fallbackSummarizationProvider` / `fallbackSummarizationModel` | 留空 | 主摘要调用失败（例如余额耗尽、鉴权或供应商错误）时尝试一次的显式备用路由；填写时必须是完整的一对。 |
+| `compaction.maxTokens` | `8192` | 摘要输出的最大 token 数。 |
+
+如果配置了主摘要路由而其调用失败，插件会先尝试一次显式备用路由；没有填写备用路由时，若当前对话路由与主路由不同，则改用当前对话路由。它**不会随机选择任意模型**：所有回退路由都必须已由 DSH 知道，保证恢复过程可预测、可复现。底层仍使用 DSH 的持久事务：`compaction/start` → 摘要 → checkpoint 替换 → `compaction/end`；只有替换成功提交后，因上下文溢出失败的原请求才会自动重试。
+
 教训记录结构：
 
 ```json

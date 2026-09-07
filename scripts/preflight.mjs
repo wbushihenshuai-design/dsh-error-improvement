@@ -64,7 +64,14 @@ assert.match(patch, /name:\s+dsh-error-improvement/u);
 
 const host = await import(new URL("lib/index.js", root));
 assert.equal(host.name, "dsh-error-improvement");
-assert.deepEqual(host.inject, ["agents", "settings"]);
+assert.deepEqual(host.inject, [
+	"agents",
+	"settings",
+	"compaction",
+	"llm",
+	"tokenMeter",
+	"sessions",
+]);
 assert.equal(typeof host.apply, "function");
 
 console.log(

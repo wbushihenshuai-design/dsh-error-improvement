@@ -14,6 +14,16 @@ window.__ModuleLoader__.load({
 			maxLessons: 5,
 			maxChars: 6000,
 			lessons: [],
+			compaction: {
+				enabled: true,
+				thresholdRatio: 0.8,
+				retainRatio: 0.16,
+				summarizationProvider: "",
+				summarizationModel: "",
+				fallbackSummarizationProvider: "",
+				fallbackSummarizationModel: "",
+				maxTokens: 8192,
+			},
 		};
 
 		const zh = {
@@ -52,6 +62,17 @@ window.__ModuleLoader__.load({
 			invalidNumber: "规则数或字符上限超出允许范围。",
 			unsaved: "有未保存的更改。",
 			error: "保存失败：{message}",
+			compactionTitle: "压缩上下文",
+			compactionEnabled: "启用自动压缩",
+			compactionThreshold: "压缩触发阈值（上下文使用百分比）",
+			compactionRetain: "压缩后保留最近比例",
+			compactionModel: "主压缩摘要模型（留空=使用当前对话模型）",
+			compactionFallbackModel:
+				"备用摘要模型（主模型失败时使用；留空=当前对话模型）",
+			compactionModelHint: "格式：provider/model，如 codexpp/gpt-5.6-sol",
+			compactionMaxTokens: "摘要最大输出 tokens",
+			invalidCompaction:
+				"压缩设置无效：保留比例必须小于触发阈值；模型必须填写完整的 provider/model，或全部留空。",
 		};
 		const en = {
 			nav: "Error improvement",
@@ -93,6 +114,18 @@ window.__ModuleLoader__.load({
 				"The lesson count or character limit is outside the allowed range.",
 			unsaved: "There are unsaved changes.",
 			error: "Save failed: {message}",
+			compactionTitle: "Context Compaction",
+			compactionEnabled: "Enable automatic compaction",
+			compactionThreshold: "Compaction trigger threshold (% of context used)",
+			compactionRetain: "Retain most recent fraction after compaction",
+			compactionModel:
+				"Primary summarization model (empty = current conversation model)",
+			compactionFallbackModel:
+				"Fallback summarization model (used when primary fails; empty = current conversation model)",
+			compactionModelHint: "Format: provider/model, e.g. codexpp/gpt-5.6-sol",
+			compactionMaxTokens: "Max output tokens for summary",
+			invalidCompaction:
+				"Invalid compaction settings: retain ratio must be lower than the trigger threshold, and every model route must be a complete provider/model pair or blank.",
 		};
 
 		function normalize(value) {
@@ -119,6 +152,25 @@ window.__ModuleLoader__.load({
 						};
 					})
 				: [];
+			const c = value?.compaction || {};
+			const compaction = {
+				enabled: c.enabled !== false,
+				thresholdRatio: Number.isFinite(c.thresholdRatio)
+					? Math.max(0.1, Math.min(0.99, c.thresholdRatio))
+					: 0.8,
+				retainRatio: Number.isFinite(c.retainRatio)
+					? Math.max(0.02, Math.min(0.5, c.retainRatio))
+					: 0.16,
+				summarizationProvider: String(c.summarizationProvider || ""),
+				summarizationModel: String(c.summarizationModel || ""),
+				fallbackSummarizationProvider: String(
+					c.fallbackSummarizationProvider || "",
+				),
+				fallbackSummarizationModel: String(c.fallbackSummarizationModel || ""),
+				maxTokens: Number.isFinite(c.maxTokens)
+					? Math.max(256, Math.min(65536, Math.floor(c.maxTokens)))
+					: 8192,
+			};
 			return {
 				enabled: value?.enabled !== false,
 				mode: value?.mode === "strict" ? "strict" : "assist",
@@ -129,6 +181,7 @@ window.__ModuleLoader__.load({
 					? value.maxChars
 					: defaults.maxChars,
 				lessons,
+				compaction,
 			};
 		}
 
@@ -138,6 +191,27 @@ window.__ModuleLoader__.load({
 
 		function sameValue(left, right) {
 			return JSON.stringify(left) === JSON.stringify(right);
+		}
+
+		function completeRoute(provider, model) {
+			return (
+				Boolean(String(provider || "").trim()) ===
+				Boolean(String(model || "").trim())
+			);
+		}
+
+		function validCompaction(compaction) {
+			return (
+				compaction.retainRatio < compaction.thresholdRatio &&
+				completeRoute(
+					compaction.summarizationProvider,
+					compaction.summarizationModel,
+				) &&
+				completeRoute(
+					compaction.fallbackSummarizationProvider,
+					compaction.fallbackSummarizationModel,
+				)
+			);
 		}
 
 		function createEditorController(initialSnapshot) {
@@ -247,6 +321,11 @@ window.__ModuleLoader__.load({
 			};
 			const setField = (key, value) =>
 				update((current) => ({ ...current, [key]: value }));
+			const setCompaction = (key, value) =>
+				update((current) => ({
+					...current,
+					compaction: { ...current.compaction, [key]: value },
+				}));
 			const setLesson = (index, key, value) =>
 				update((current) => ({
 					...current,
@@ -301,6 +380,10 @@ window.__ModuleLoader__.load({
 					)
 				) {
 					setNotice({ kind: "error", text: t("incomplete") });
+					return;
+				}
+				if (!validCompaction(draft.compaction)) {
+					setNotice({ kind: "error", text: t("invalidCompaction") });
 					return;
 				}
 				controller.update((current) => ({ ...current, maxLessons, maxChars }));
@@ -516,6 +599,154 @@ window.__ModuleLoader__.load({
 					readOnly
 						? jsx.jsx("p", { style: styles.hint, children: t("readonly") })
 						: null,
+					// ─── Compaction panel ───
+					jsx.jsx("hr", { style: styles.divider }),
+					jsx.jsx("h3", { style: styles.h3, children: t("compactionTitle") }),
+					jsx.jsx("label", {
+						style: styles.checkboxRow,
+						children: [
+							jsx.jsx("input", {
+								type: "checkbox",
+								checked: draft.compaction?.enabled ?? true,
+								disabled: readOnly || saving,
+								onChange: (e) => setCompaction("enabled", e.target.checked),
+							}),
+							` ${t("compactionEnabled")}`,
+						],
+					}),
+					jsx.jsxs("label", {
+						style: styles.field,
+						children: [
+							t("compactionThreshold"),
+							jsx.jsx("input", {
+								type: "range",
+								min: 10,
+								max: 99,
+								step: 1,
+								value: Math.round(
+									(draft.compaction?.thresholdRatio ?? 0.8) * 100,
+								),
+								disabled: readOnly || saving,
+								onChange: (e) =>
+									setCompaction("thresholdRatio", Number(e.target.value) / 100),
+								style: styles.slider,
+							}),
+							` ${Math.round(
+								(draft.compaction?.thresholdRatio ?? 0.8) * 100,
+							)}%`,
+						],
+					}),
+					jsx.jsxs("label", {
+						style: styles.field,
+						children: [
+							t("compactionRetain"),
+							jsx.jsx("input", {
+								type: "range",
+								min: 2,
+								max: 50,
+								step: 1,
+								value: Math.round(
+									(draft.compaction?.retainRatio ?? 0.16) * 100,
+								),
+								disabled: readOnly || saving,
+								onChange: (e) =>
+									setCompaction("retainRatio", Number(e.target.value) / 100),
+								style: styles.slider,
+							}),
+							` ${Math.round((draft.compaction?.retainRatio ?? 0.16) * 100)}%`,
+						],
+					}),
+					jsx.jsxs("label", {
+						style: styles.field,
+						children: [
+							t("compactionModel"),
+							jsx.jsx("input", {
+								type: "text",
+								value: draft.compaction?.summarizationProvider
+									? `${draft.compaction.summarizationProvider}/${draft.compaction.summarizationModel}`
+									: "",
+								placeholder: t("compactionModelHint"),
+								disabled: readOnly || saving,
+								onChange: (e) => {
+									const raw = e.target.value.trim();
+									const slash = raw.indexOf("/");
+									if (slash > 0 && slash < raw.length - 1) {
+										update((current) => ({
+											...current,
+											compaction: {
+												...current.compaction,
+												summarizationProvider: raw.slice(0, slash),
+												summarizationModel: raw.slice(slash + 1),
+											},
+										}));
+									} else {
+										update((current) => ({
+											...current,
+											compaction: {
+												...current.compaction,
+												summarizationProvider: "",
+												summarizationModel: "",
+											},
+										}));
+									}
+								},
+							}),
+						],
+					}),
+					jsx.jsxs("label", {
+						style: styles.field,
+						children: [
+							t("compactionFallbackModel"),
+							jsx.jsx("input", {
+								type: "text",
+								value: draft.compaction?.fallbackSummarizationProvider
+									? `${draft.compaction.fallbackSummarizationProvider}/${draft.compaction.fallbackSummarizationModel}`
+									: "",
+								placeholder: t("compactionModelHint"),
+								disabled: readOnly || saving,
+								onChange: (e) => {
+									const raw = e.target.value.trim();
+									const slash = raw.indexOf("/");
+									if (slash > 0 && slash < raw.length - 1) {
+										update((current) => ({
+											...current,
+											compaction: {
+												...current.compaction,
+												fallbackSummarizationProvider: raw.slice(0, slash),
+												fallbackSummarizationModel: raw.slice(slash + 1),
+											},
+										}));
+									} else {
+										update((current) => ({
+											...current,
+											compaction: {
+												...current.compaction,
+												fallbackSummarizationProvider: "",
+												fallbackSummarizationModel: "",
+											},
+										}));
+									}
+								},
+							}),
+						],
+					}),
+					jsx.jsxs("label", {
+						style: styles.field,
+						children: [
+							t("compactionMaxTokens"),
+							jsx.jsx("input", {
+								type: "number",
+								min: 256,
+								max: 65536,
+								step: 256,
+								value: draft.compaction?.maxTokens ?? 8192,
+								disabled: readOnly || saving,
+								onChange: (e) =>
+									setCompaction("maxTokens", Number(e.target.value)),
+								style: styles.numberField,
+							}),
+						],
+					}),
 					dirty && !readOnly
 						? jsx.jsx("p", { style: styles.hint, children: t("unsaved") })
 						: null,
@@ -638,6 +869,40 @@ window.__ModuleLoader__.load({
 				margin: 0,
 				color: "var(--dsw-alias-state-error-primary)",
 				fontSize: 12,
+			},
+			divider: {
+				border: "none",
+				borderTop: "1px solid var(--dsw-alias-border-l3)",
+				margin: "8px 0",
+			},
+			h3: {
+				margin: "4px 0 0 0",
+				fontSize: 14,
+				fontWeight: 500,
+				color: "var(--dsw-alias-label-primary)",
+			},
+			checkboxRow: {
+				display: "flex",
+				gap: 8,
+				alignItems: "center",
+				fontSize: 14,
+			},
+			field: {
+				display: "flex",
+				flexDirection: "column",
+				gap: 4,
+				fontSize: 13,
+				color: "var(--dsw-alias-label-secondary)",
+			},
+			slider: {
+				width: "100%",
+				margin: "4px 0",
+				accentColor: "var(--dsw-alias-button-primary-fill)",
+			},
+			numberField: {
+				...field,
+				width: 100,
+				height: 30,
 			},
 		};
 

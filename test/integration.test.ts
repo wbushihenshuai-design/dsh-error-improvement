@@ -155,6 +155,6 @@ test("host returns downstream decisions unchanged if current settings getter thr
 		async () => downstream,
 	);
 	assert.equal(result, downstream);
-	assert.equal(warnings.length, 1);
-	assert.match(warnings[0] ?? "", /failed open/u);
+	assert.ok(warnings.length >= 1);
+	assert.ok(warnings.some((warning) => /failed open/u.test(warning)));
 });
