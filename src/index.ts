@@ -15,14 +15,9 @@ import {
 } from "./lessons.js";
 
 export const name = PLUGIN_NAME;
-export const inject = [
-	"agents",
-	"settings",
-	"compaction",
-	"llm",
-	"tokenMeter",
-	"sessions",
-];
+// `compaction` must not be a module-level dependency: this plugin replaces the
+// base implementation once it becomes available through the scoped callback.
+export const inject = ["agents", "settings"];
 export { ErrorImprovementSettingsSchema };
 export type { ErrorImprovementSettings };
 

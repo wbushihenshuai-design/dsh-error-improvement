@@ -1,5 +1,5 @@
 # Mount one host plugin row into the active agent composition.
-# The plugin injects agents, settings, compaction, llm, tokenMeter, and sessions.
+# The plugin activates after agents/settings, then waits internally for compaction.
 - insert:
     - id: error-improvement
       name: dsh-error-improvement
