@@ -1,0 +1,4 @@
+# Mount one host plugin row into the active agent composition.
+- insert:
+    - id: error-improvement
+      name: dsh-error-improvement
