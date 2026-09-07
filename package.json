@@ -57,7 +57,7 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json && node scripts/copy-client.mjs",
-    "prepare": "npm run build",
+    "prepare": "node scripts/prepare.mjs",
     "typecheck": "tsc -p tsconfig.test.json && node --check src/client.js",
     "test": "node --import tsx --test \"test/**/*.test.ts\"",
     "lint": "biome check src test scripts",
