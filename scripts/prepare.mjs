@@ -1,7 +1,8 @@
 // Runs on `npm install` / `git clone` / pnpm prepare.
 // Skips the build when lib/ already exists (published tarball or pre-built clone).
-import { existsSync } from "node:fs";
+
 import { execFileSync } from "node:child_process";
+import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 

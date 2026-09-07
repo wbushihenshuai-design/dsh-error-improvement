@@ -21,6 +21,8 @@ export interface ErrorImprovementSettings {
     maxChars?: number;
     lessons?: ErrorLesson[];
 }
+/** Built-in lessons that apply to every installation. */
+export declare const builtinLessons: readonly ErrorLesson[];
 export declare const defaultSettings: Readonly<Required<ErrorImprovementSettings>>;
 export declare const ErrorImprovementSettingsSchema: z<Schemastery.ObjectS<{
     enabled: z<boolean, boolean>;

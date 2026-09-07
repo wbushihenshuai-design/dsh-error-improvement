@@ -4,6 +4,7 @@ import type { Context } from "@deepseek-ai/cordis";
 import type { PreStepDecision } from "@deepseek-ai/dsh-agent";
 
 import {
+	builtinLessons,
 	defaultSettings,
 	type ErrorImprovementSettings,
 	ErrorImprovementSettingsSchema,
@@ -59,7 +60,7 @@ export function apply(ctx: Context): void {
 			ctx,
 			SETTINGS_NAMESPACE,
 			ErrorImprovementSettingsSchema,
-			{ ...defaultSettings, lessons: [] },
+			{ ...defaultSettings, lessons: [...builtinLessons] },
 			{
 				setSource: (source) => {
 					currentSettings = source;

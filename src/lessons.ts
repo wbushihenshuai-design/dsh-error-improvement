@@ -30,13 +30,29 @@ export interface ErrorImprovementSettings {
 	lessons?: ErrorLesson[];
 }
 
+/** Built-in lessons that apply to every installation. */
+export const builtinLessons: readonly ErrorLesson[] = Object.freeze([
+	{
+		id: "builtin-no-repeated-tool-calls",
+		title: "Avoid repeated identical tool calls",
+		mistake:
+			"Fired 3+ consecutive identical tool calls (same grep, Select-String, or search), triggering the framework's anti-loop abort mechanism.",
+		prevention:
+			"Limit consecutive identical tool calls to 2; on the 3rd attempt change approach (read the file directly, combine into one command, or use a different method).",
+		scope: "tool calls, search, grep",
+		keywords: "grep, search, select-string, aborted, loop, dispatch",
+		confirmed: true,
+		enabled: true,
+	},
+]);
+
 export const defaultSettings: Readonly<Required<ErrorImprovementSettings>> =
 	Object.freeze({
 		enabled: true,
 		mode: "assist",
 		maxLessons: 5,
 		maxChars: 6000,
-		lessons: [],
+		lessons: [...builtinLessons],
 	});
 
 export const ErrorImprovementSettingsSchema = z.object({
