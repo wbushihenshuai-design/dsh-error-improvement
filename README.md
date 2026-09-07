@@ -1,5 +1,7 @@
 # DSH Error Improvement
 
+English | [中文](README.zh.md)
+
 A standalone DeepSeek Harness plugin that turns **user-confirmed mistakes** into bounded pre-task checks, helping an agent avoid repeating the same error.
 
 It is intentionally independent from EverOS, memory services, databases, browsers, and network APIs. The only persistent state is the normal DSH settings namespace `error-improvement`.
