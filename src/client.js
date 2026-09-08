@@ -288,42 +288,52 @@ window.__ModuleLoader__.load({
 			};
 		}
 
+		function responseValue(response) {
+			return response?.result?.value ?? response?.value ?? response;
+		}
+
+		function normalizeModelList(list, provider = "") {
+			if (!Array.isArray(list)) return [];
+			return list
+				.map((model) => {
+					const id = String(model?.id || model?.model || "");
+					const routeProvider = String(model?.provider || provider || "");
+					return {
+						id:
+							routeProvider && !id.includes("/")
+								? `${routeProvider}/${id}`
+								: id,
+						name: String(model?.name || id),
+						provider: routeProvider,
+					};
+				})
+				.filter((model) => model.id);
+		}
+
 		async function readModelCatalog(ctx) {
 			try {
-				const connection = ctx?.get?.("connection");
+				const connection = ctx?.get?.("connection") ?? ctx?.connection;
 				if (!connection?.api) return [];
 				let models = [];
 				if (typeof connection.api.llm?.discoverModels === "function") {
 					const response = await connection.api.llm.discoverModels();
-					const list = response?.result?.value?.models;
-					if (Array.isArray(list)) {
-						models = list
-							.map((model) => ({
-								id: String(model.id || ""),
-								name: String(model.name || model.id || ""),
-								provider: String(model.provider || ""),
-							}))
-							.filter((model) => model.id);
-					}
+					const value = responseValue(response);
+					models = normalizeModelList(value?.models ?? value);
 				}
 				if (
 					models.length === 0 &&
 					typeof connection.api.sessions?.modelCatalog === "function"
 				) {
 					const response = await connection.api.sessions.modelCatalog();
-					const groups = response?.result?.value?.groups;
+					const groups = responseValue(response)?.groups;
 					if (Array.isArray(groups)) {
 						for (const group of groups) {
-							for (const model of group.models ?? []) {
-								const provider = String(group.provider || model.provider || "");
-								const id = String(model.id || "");
-								if (!id) continue;
-								models.push({
-									id: provider ? `${provider}/${id}` : id,
-									name: String(model.name || id),
-									provider,
-								});
-							}
+							models.push(
+								...normalizeModelList(
+									group.models,
+									String(group.provider || ""),
+								),
+							);
 						}
 					}
 				}
@@ -358,14 +368,35 @@ window.__ModuleLoader__.load({
 
 			React.useEffect(() => {
 				let active = true;
-				setModelCatalogLoading(true);
-				readModelCatalog(ctx).then((models) => {
+				let timer;
+				let attempts = 0;
+				const load = async () => {
+					attempts += 1;
+					const models = await readModelCatalog(ctx);
 					if (!active) return;
-					setModelCatalog(models);
-					setModelCatalogLoading(false);
-				});
+					if (models.length > 0 || attempts >= 4) {
+						setModelCatalog(models);
+						setModelCatalogLoading(false);
+						return;
+					}
+					timer = setTimeout(load, 500);
+				};
+				setModelCatalogLoading(true);
+				load();
+				let disposeReset;
+				try {
+					disposeReset = ctx?.on?.("connection/reset", () => {
+						attempts = 0;
+						setModelCatalogLoading(true);
+						load();
+					});
+				} catch {
+					disposeReset = undefined;
+				}
 				return () => {
 					active = false;
+					if (timer !== undefined) clearTimeout(timer);
+					disposeReset?.();
 				};
 			}, [ctx]);
 
@@ -788,6 +819,22 @@ window.__ModuleLoader__.load({
 									),
 								],
 							}),
+							!modelCatalogLoading && modelCatalog.length === 0
+								? jsx.jsx("input", {
+										type: "text",
+										value: routeValue(
+											draft.compaction?.summarizationProvider,
+											draft.compaction?.summarizationModel,
+										),
+										placeholder: t("compactionModelHint"),
+										disabled: readOnly || saving,
+										onChange: (e) => {
+											const value = e.target.value.trim();
+											setRoute("summarization", value);
+										},
+										style: styles.input,
+									})
+								: null,
 							jsx.jsx("small", {
 								style: styles.hint,
 								children: modelCatalogLoading
