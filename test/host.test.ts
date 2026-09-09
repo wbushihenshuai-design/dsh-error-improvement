@@ -28,7 +28,7 @@ function userMessage(text: string): UserMessage {
 test("preserves rejected decisions by identity", () => {
 	const rejected: PreStepDecision = { kind: "reject" };
 	assert.equal(
-		improveDecision(rejected, 1, false, {
+		improveDecision(rejected, false, {
 			mode: "strict",
 			lessons: [confirmedLesson],
 		}),
@@ -43,7 +43,7 @@ test("does not manufacture a request from an empty enter decision", () => {
 		startsRequestSeries: true,
 	};
 	assert.equal(
-		improveDecision(empty, 1, false, {
+		improveDecision(empty, false, {
 			mode: "strict",
 			lessons: [confirmedLesson],
 		}),
@@ -51,20 +51,13 @@ test("does not manufacture a request from an empty enter decision", () => {
 	);
 });
 
-test("does not inject on later steps or after abort", () => {
+test("does not inject after abort", () => {
 	const decision: PreStepDecision = {
 		kind: "enter",
 		messages: [userMessage("profile work")],
 	};
 	assert.equal(
-		improveDecision(decision, 2, false, {
-			mode: "strict",
-			lessons: [confirmedLesson],
-		}),
-		decision,
-	);
-	assert.equal(
-		improveDecision(decision, 1, true, {
+		improveDecision(decision, true, {
 			mode: "strict",
 			lessons: [confirmedLesson],
 		}),
@@ -78,7 +71,7 @@ test("preserves enter metadata and appends a separately attributed message", () 
 		messages: [userMessage("inspect profile")],
 		startsRequestSeries: true,
 	};
-	const improved = improveDecision(decision, 1, false, {
+	const improved = improveDecision(decision, false, {
 		mode: "strict",
 		lessons: [confirmedLesson],
 	});
@@ -101,7 +94,7 @@ test("unconfirmed lessons are never injected", () => {
 		kind: "enter",
 		messages: [userMessage("inspect profile")],
 	};
-	const result = improveDecision(decision, 1, false, {
+	const result = improveDecision(decision, false, {
 		mode: "strict",
 		lessons: [{ ...confirmedLesson, confirmed: false }],
 	});

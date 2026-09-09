@@ -37,16 +37,10 @@ interface SettingsService {
 
 export function improveDecision(
 	decision: PreStepDecision,
-	step: number,
 	aborted: boolean,
 	settings: ErrorImprovementSettings,
 ): PreStepDecision {
-	if (
-		decision.kind === "reject" ||
-		aborted ||
-		step !== 1 ||
-		decision.messages.length === 0
-	) {
+	if (decision.kind === "reject" || aborted || decision.messages.length === 0) {
 		return decision;
 	}
 	const message = lessonMessage(settings, decision.messages);
@@ -76,15 +70,10 @@ export function apply(ctx: Context): void {
 
 	ctx.on(
 		"agent/pre-step",
-		async ({ signal, step }, next): Promise<PreStepDecision> => {
+		async ({ signal }, next): Promise<PreStepDecision> => {
 			const decision = await next();
 			try {
-				return improveDecision(
-					decision,
-					step,
-					signal.aborted,
-					currentSettings(),
-				);
+				return improveDecision(decision, signal.aborted, currentSettings());
 			} catch (error) {
 				ctx.logger.warn(
 					`${PLUGIN_NAME}: lesson injection failed open: ${String(error)}`,
