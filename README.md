@@ -23,7 +23,7 @@ It is intentionally independent from EverOS, memory services, databases, browser
 
 1. The Host registers the `error-improvement` settings section through DSH's settings provider.
 2. In **Settings → 错误改进**, the user records a mistake, a prevention rule, optional scope/keywords, and explicitly confirms it.
-3. On the first model step of each turn, the Host wraps the `agent/pre-step` waterfall and inspects the complete downstream message batch.
+3. On every model step of each turn, the Host wraps the `agent/pre-step` waterfall and inspects the complete downstream message batch. Unlike a one-shot injection at the first step only, this ensures prevention rules are visible before **every** LLM call — including follow-up tool calls that the model makes within the same turn.
 4. `assist` mode injects only lessons whose explicit scope/keywords match the current direct-user message. Latin/digit keywords require whole-token equality (no substring false positives); CJK uses bigram matching. If scope/keywords are blank, it falls back to conservative multi-term matching.
 5. `strict` mode injects all enabled, confirmed, complete lessons up to the configured limits.
 
@@ -51,6 +51,9 @@ It is intentionally independent from EverOS, memory services, databases, browser
 | `compaction.maxTokens` | `8192` | Maximum summary output tokens. |
 
 When the primary route is configured but its summary call fails, the plugin tries the explicit fallback route once. If no explicit fallback is set, it retries using the current conversation route when that is different. It never chooses an arbitrary provider/model: a route must already be known to DSH, so recovery stays predictable and reproducible. The upstream DSH engine records the normal durable transaction (`compaction/start` → summary → checkpoint replacement → `compaction/end`) and then retries a context-overflow request only after the replacement was committed.
+
+> ⚠️ **Threshold and summarization model context window.**
+> If your summarization model has the same advertised context window as your conversation model, the default threshold of `0.8` (80 %) can cause a chicken-and-egg problem: the compaction engine fires once the conversation reaches 80 % of the context window, but the summarization call then sends the full conversation to the same model and overflows its limit. **Set `compaction.thresholdRatio` to `0.5` or lower** so compaction starts well before the conversation fills the window, leaving enough headroom for the summarization request. Alternatively, configure a different summarization model with a larger context window.
 
 A lesson contains:
 
