@@ -1,6 +1,6 @@
 {
   "name": "dsh-error-improvement",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Configurable user-confirmed lessons that help DeepSeek Harness avoid repeating mistakes.",
   "keywords": [
     "deepseek-harness",
@@ -33,6 +33,7 @@
   "files": [
     "lib/**/*.js",
     "lib/**/*.d.ts",
+    "scripts/prepare.mjs",
     "cordis.patch.yml",
     "README.md",
     "README.zh.md",

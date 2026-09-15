@@ -6,5 +6,5 @@ export declare const name = "dsh-error-improvement";
 export declare const inject: string[];
 export { ErrorImprovementSettingsSchema };
 export type { ErrorImprovementSettings };
-export declare function improveDecision(decision: PreStepDecision, step: number, aborted: boolean, settings: ErrorImprovementSettings): PreStepDecision;
+export declare function improveDecision(decision: PreStepDecision, aborted: boolean, settings: ErrorImprovementSettings): PreStepDecision;
 export declare function apply(ctx: Context): void;
