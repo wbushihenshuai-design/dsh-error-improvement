@@ -14,6 +14,27 @@ export interface ErrorLesson {
     confirmed?: boolean;
     enabled?: boolean;
 }
+export interface SuccessRecipe {
+    id: string;
+    title: string;
+    problem: string;
+    solution: string;
+    scope?: string;
+    keywords?: string;
+    confirmed?: boolean;
+    enabled?: boolean;
+}
+export interface EnforcementSettings {
+    enabled?: boolean;
+    /** Repeated identical tool errors required before a rule is promoted. */
+    threshold?: number;
+    /** warn = intercept once per cooldown, deny = always block matching calls. */
+    defaultMode?: "warn" | "deny";
+    /** Minimum milliseconds between two warn-mode interceptions of one rule. */
+    warnCooldownMs?: number;
+    /** Cap on promoted rules; oldest auto-rules are evicted beyond the cap. */
+    maxRules?: number;
+}
 export interface CompactionSettings {
     enabled?: boolean;
     /** Fraction of context window at which compaction triggers (0.0–1.0). */
@@ -36,7 +57,10 @@ export interface ErrorImprovementSettings {
     mode?: "assist" | "strict";
     maxLessons?: number;
     maxChars?: number;
+    maxRecipes?: number;
     lessons?: ErrorLesson[];
+    recipes?: SuccessRecipe[];
+    enforcement?: EnforcementSettings;
     compaction?: CompactionSettings;
 }
 /** Built-in lessons that apply to every installation. */
@@ -47,6 +71,7 @@ export declare const ErrorImprovementSettingsSchema: z<Schemastery.ObjectS<{
     mode: z<"assist" | "strict", "assist" | "strict">;
     maxLessons: z<number, number>;
     maxChars: z<number, number>;
+    maxRecipes: z<number, number>;
     lessons: z<({
         id?: string | null | undefined;
         title?: string | null | undefined;
@@ -66,6 +91,38 @@ export declare const ErrorImprovementSettingsSchema: z<Schemastery.ObjectS<{
         confirmed: z<boolean, boolean>;
         enabled: z<boolean, boolean>;
     }>[]>;
+    recipes: z<({
+        id?: string | null | undefined;
+        title?: string | null | undefined;
+        problem?: string | null | undefined;
+        solution?: string | null | undefined;
+        scope?: string | null | undefined;
+        keywords?: string | null | undefined;
+        confirmed?: boolean | null | undefined;
+        enabled?: boolean | null | undefined;
+    } & import("@deepseek-ai/cosmokit").Dict)[], Schemastery.ObjectT<{
+        id: z<string, string>;
+        title: z<string, string>;
+        problem: z<string, string>;
+        solution: z<string, string>;
+        scope: z<string, string>;
+        keywords: z<string, string>;
+        confirmed: z<boolean, boolean>;
+        enabled: z<boolean, boolean>;
+    }>[]>;
+    enforcement: z<Schemastery.ObjectS<{
+        enabled: z<boolean, boolean>;
+        threshold: z<number, number>;
+        defaultMode: z<"warn" | "deny", "warn" | "deny">;
+        warnCooldownMs: z<number, number>;
+        maxRules: z<number, number>;
+    }>, Schemastery.ObjectT<{
+        enabled: z<boolean, boolean>;
+        threshold: z<number, number>;
+        defaultMode: z<"warn" | "deny", "warn" | "deny">;
+        warnCooldownMs: z<number, number>;
+        maxRules: z<number, number>;
+    }>>;
     compaction: z<Schemastery.ObjectS<{
         enabled: z<boolean, boolean>;
         thresholdRatio: z<number, number>;
@@ -90,6 +147,7 @@ export declare const ErrorImprovementSettingsSchema: z<Schemastery.ObjectS<{
     mode: z<"assist" | "strict", "assist" | "strict">;
     maxLessons: z<number, number>;
     maxChars: z<number, number>;
+    maxRecipes: z<number, number>;
     lessons: z<({
         id?: string | null | undefined;
         title?: string | null | undefined;
@@ -109,6 +167,38 @@ export declare const ErrorImprovementSettingsSchema: z<Schemastery.ObjectS<{
         confirmed: z<boolean, boolean>;
         enabled: z<boolean, boolean>;
     }>[]>;
+    recipes: z<({
+        id?: string | null | undefined;
+        title?: string | null | undefined;
+        problem?: string | null | undefined;
+        solution?: string | null | undefined;
+        scope?: string | null | undefined;
+        keywords?: string | null | undefined;
+        confirmed?: boolean | null | undefined;
+        enabled?: boolean | null | undefined;
+    } & import("@deepseek-ai/cosmokit").Dict)[], Schemastery.ObjectT<{
+        id: z<string, string>;
+        title: z<string, string>;
+        problem: z<string, string>;
+        solution: z<string, string>;
+        scope: z<string, string>;
+        keywords: z<string, string>;
+        confirmed: z<boolean, boolean>;
+        enabled: z<boolean, boolean>;
+    }>[]>;
+    enforcement: z<Schemastery.ObjectS<{
+        enabled: z<boolean, boolean>;
+        threshold: z<number, number>;
+        defaultMode: z<"warn" | "deny", "warn" | "deny">;
+        warnCooldownMs: z<number, number>;
+        maxRules: z<number, number>;
+    }>, Schemastery.ObjectT<{
+        enabled: z<boolean, boolean>;
+        threshold: z<number, number>;
+        defaultMode: z<"warn" | "deny", "warn" | "deny">;
+        warnCooldownMs: z<number, number>;
+        maxRules: z<number, number>;
+    }>>;
     compaction: z<Schemastery.ObjectS<{
         enabled: z<boolean, boolean>;
         thresholdRatio: z<number, number>;
@@ -130,6 +220,7 @@ export declare const ErrorImprovementSettingsSchema: z<Schemastery.ObjectS<{
     }>>;
 }>>;
 export declare function relevanceScore(lesson: ErrorLesson, query: string): number;
+export declare function safeField(value: string | undefined, maxLength?: number): string;
 export declare function selectLessons(settings: ErrorImprovementSettings, query: string): ErrorLesson[];
 export declare function renderLessons(settings: ErrorImprovementSettings, query: string): string | undefined;
 export declare function blocksToText(blocks: readonly ContentBlock[] | undefined): string;

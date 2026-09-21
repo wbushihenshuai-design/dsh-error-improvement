@@ -4,15 +4,18 @@ import type { Context } from "@deepseek-ai/cordis";
 import type { PreStepDecision } from "@deepseek-ai/dsh-agent";
 
 import { ConfigurableCompactionEngine } from "./compaction.js";
+import { mountEnforcement } from "./enforcement.js";
 import {
 	builtinLessons,
 	defaultSettings,
 	type ErrorImprovementSettings,
 	ErrorImprovementSettingsSchema,
-	lessonMessage,
 	PLUGIN_NAME,
 	SETTINGS_NAMESPACE,
+	type SuccessRecipe,
 } from "./lessons.js";
+import { improvementMessage, recordRecipe } from "./recipes.js";
+import { ImprovementStore } from "./store.js";
 
 export const name = PLUGIN_NAME;
 // llm/tokenMeter/sessions are required before apply() runs so the compaction
@@ -35,17 +38,97 @@ interface SettingsService {
 	) => void;
 }
 
+interface ToolService {
+	register: (definition: unknown) => () => void;
+}
+
 export function improveDecision(
 	decision: PreStepDecision,
 	aborted: boolean,
 	settings: ErrorImprovementSettings,
+	runtimeRecipes: readonly SuccessRecipe[] = [],
 ): PreStepDecision {
 	if (decision.kind === "reject" || aborted || decision.messages.length === 0) {
 		return decision;
 	}
-	const message = lessonMessage(settings, decision.messages);
+	const message = improvementMessage(
+		settings,
+		decision.messages,
+		runtimeRecipes,
+	);
 	if (!message) return decision;
 	return { ...decision, messages: [...decision.messages, message] };
+}
+
+function registerRecipeTool(ctx: Context, store: ImprovementStore): void {
+	try {
+		const tools = (ctx as unknown as { tools?: ToolService }).tools;
+		if (!tools || typeof tools.register !== "function") return;
+		const dispose = tools.register({
+			name: "improve_record_recipe",
+			description:
+				"Record a proven solution (success recipe) right after you solve a non-trivial problem, so future tasks reuse it instead of re-deriving the approach. Use only for verified, working solutions — never for guesses or untested ideas. Set asSkill=true to also graduate the recipe into a standalone DSH skill file under the skills directory.",
+			parameters: {
+				type: "object",
+				additionalProperties: false,
+				properties: {
+					title: {
+						type: "string",
+						required: true,
+						description: "Short name of the solved problem pattern.",
+					},
+					problem: {
+						type: "string",
+						required: true,
+						description: "Symptoms and context of the problem that was solved.",
+					},
+					solution: {
+						type: "string",
+						required: true,
+						description:
+							"The verified working solution, concrete enough to re-apply directly.",
+					},
+					scope: {
+						type: "string",
+						description: "Where this recipe applies (tools, projects, setups).",
+					},
+					keywords: {
+						type: "string",
+						description:
+							"Comma-separated trigger words that should surface this recipe.",
+					},
+					asSkill: {
+						type: "boolean",
+						description:
+							"Also write a SKILL.md into the DSH skills directory so the recipe becomes a first-class skill.",
+					},
+				},
+			},
+			output: {
+				schema: {
+					type: "object",
+					additionalProperties: false,
+					properties: {
+						message: { type: "string", required: true },
+						id: { type: "string", required: true },
+						skillPath: { type: "string" },
+					},
+				},
+				render: (value: { message: string }) => value.message,
+			},
+			timeoutMs: 10_000,
+			execute: async (args: unknown) =>
+				recordRecipe(store, (args ?? {}) as Parameters<typeof recordRecipe>[1]),
+		});
+		(ctx as unknown as { effect?: (fn: () => void) => void }).effect?.(
+			() => dispose,
+		);
+		ctx.logger.info(`${PLUGIN_NAME}: improve_record_recipe tool registered`);
+	} catch (error) {
+		ctx.logger.warn(
+			`${PLUGIN_NAME}: recipe tool registration failed: ${String(error)}`,
+		);
+	}
 }
 
 export function apply(ctx: Context): void {
@@ -68,12 +151,26 @@ export function apply(ctx: Context): void {
 		);
 	});
 
+	let store: ImprovementStore | undefined;
+	try {
+		store = new ImprovementStore();
+	} catch (error) {
+		ctx.logger.warn(
+			`${PLUGIN_NAME}: state store unavailable, enforcement and recipes disabled: ${String(error)}`,
+		);
+	}
+
 	ctx.on(
 		"agent/pre-step",
 		async ({ signal }, next): Promise<PreStepDecision> => {
 			const decision = await next();
 			try {
-				return improveDecision(decision, signal.aborted, currentSettings());
+				return improveDecision(
+					decision,
+					signal.aborted,
+					currentSettings(),
+					store?.data.recipes ?? [],
+				);
 			} catch (error) {
 				ctx.logger.warn(
 					`${PLUGIN_NAME}: lesson injection failed open: ${String(error)}`,
@@ -83,6 +180,18 @@ export function apply(ctx: Context): void {
 		},
 		{ prepend: true },
 	);
+
+	if (store) {
+		try {
+			mountEnforcement(ctx, currentSettings, store);
+			ctx.logger.info(`${PLUGIN_NAME}: enforcement loop mounted`);
+		} catch (error) {
+			ctx.logger.warn(
+				`${PLUGIN_NAME}: enforcement mounting failed: ${String(error)}`,
+			);
+		}
+		registerRecipeTool(ctx, store);
+	}
 
 	// Construct the configurable compaction engine directly: llm, tokenMeter,
 	// and sessions are guaranteed available by the module-level inject list.

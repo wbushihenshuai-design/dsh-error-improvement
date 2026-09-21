@@ -29,6 +29,22 @@ It is intentionally independent from EverOS, memory services, databases, browser
 
 `strict` is a stronger prompt policy, **not hard enforcement**. It never expands model or tool capabilities.
 
+### Repeated errors graduate into rules (0.2.0)
+
+1. The Host listens to `tools/post-execute` and counts identical failures (same tool + same normalized error signature). Counts persist across restarts in `$DSH_HOME/error-improvement/state.json`.
+2. Once a failure crosses `enforcement.threshold` (default **3**), it is promoted into a rule — linked to a matching confirmed lesson when one exists, otherwise synthesized from the error sample as an auto-rule.
+3. Matching future calls (same tool + sufficiently overlapping arguments) are intercepted on `tools/pre-execute`:
+   - `warn` (default): intercepts once per cooldown window (`warnCooldownMs`, default 1h), showing the model the prevention reason; an immediate retry is allowed — a reminder, not a blockade;
+   - `deny`: always blocks, for calls that must never happen again.
+4. Every hook **fails open** (a plugin error never blocks the tool pipeline) and never weakens an existing downstream deny/ask into an allow. Rules are capped by `maxRules` (default 20); only the oldest auto-rules are evicted beyond the cap, lesson-linked rules are kept.
+
+### Success recipes (0.2.0)
+
+- After solving a non-trivial problem, the agent can call the **`improve_record_recipe`** tool to persist the *verified* solution (title/problem/solution/scope/keywords) into the same state file.
+- Recipes share the lessons' relevance engine (including CJK bigrams) and render in a `<success_recipes>` block next to the lessons, so a recurring problem is answered with the proven fix instead of being re-derived from scratch.
+- Recording with `asSkill: true` **graduates** the recipe into a standalone skill file at `$DSH_HOME/skills/<slug>/SKILL.md` — experience becomes capability.
+- Recipes can also be maintained manually in the `recipes[]` settings section (injection likewise requires `confirmed`).
+
 ## Settings
 
 | Field | Default | Meaning |
@@ -36,8 +52,15 @@ It is intentionally independent from EverOS, memory services, databases, browser
 | `enabled` | `true` | Enables lesson injection. |
 | `mode` | `assist` | `assist` matches relevant rules; `strict` injects all eligible rules. |
 | `maxLessons` | `5` | Maximum injected rules per turn, clamped to 1–50. |
-| `maxChars` | `6000` | Maximum complete lesson block, clamped to 500–50000 characters. |
+| `maxChars` | `6000` | Maximum complete lesson block, clamped to 500–50000 characters (shared by lessons and recipes). |
+| `maxRecipes` | `3` | Maximum injected recipes per turn, clamped to 1–20. |
 | `lessons[]` | `[]` | User-managed lesson records. |
+| `recipes[]` | `[]` | User-managed success recipe records. |
+| `enforcement.enabled` | `true` | Enables repeated-error counting and pre-execution interception. |
+| `enforcement.threshold` | `3` | Identical errors required before promotion into a rule, clamped to 2–10. |
+| `enforcement.defaultMode` | `warn` | Default mode for new rules: `warn` one-shot reminder / `deny` hard block. |
+| `enforcement.warnCooldownMs` | `3600000` | Minimum milliseconds between two warn interceptions of one rule. |
+| `enforcement.maxRules` | `20` | Rule cap; oldest auto-rules are evicted beyond it. |
 
 ### Context compaction
 

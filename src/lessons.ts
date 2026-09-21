@@ -22,6 +22,29 @@ export interface ErrorLesson {
 	enabled?: boolean;
 }
 
+export interface SuccessRecipe {
+	id: string;
+	title: string;
+	problem: string;
+	solution: string;
+	scope?: string;
+	keywords?: string;
+	confirmed?: boolean;
+	enabled?: boolean;
+}
+
+export interface EnforcementSettings {
+	enabled?: boolean;
+	/** Repeated identical tool errors required before a rule is promoted. */
+	threshold?: number;
+	/** warn = intercept once per cooldown, deny = always block matching calls. */
+	defaultMode?: "warn" | "deny";
+	/** Minimum milliseconds between two warn-mode interceptions of one rule. */
+	warnCooldownMs?: number;
+	/** Cap on promoted rules; oldest auto-rules are evicted beyond the cap. */
+	maxRules?: number;
+}
+
 export interface CompactionSettings {
 	enabled?: boolean;
 	/** Fraction of context window at which compaction triggers (0.0–1.0). */
@@ -45,7 +68,10 @@ export interface ErrorImprovementSettings {
 	mode?: "assist" | "strict";
 	maxLessons?: number;
 	maxChars?: number;
+	maxRecipes?: number;
 	lessons?: ErrorLesson[];
+	recipes?: SuccessRecipe[];
+	enforcement?: EnforcementSettings;
 	compaction?: CompactionSettings;
 }
 
@@ -71,7 +97,16 @@ export const defaultSettings: Readonly<Required<ErrorImprovementSettings>> =
 		mode: "assist",
 		maxLessons: 5,
 		maxChars: 6000,
+		maxRecipes: 3,
 		lessons: [...builtinLessons],
+		recipes: [],
+		enforcement: {
+			enabled: true,
+			threshold: 3,
+			defaultMode: "warn" as "warn" | "deny",
+			warnCooldownMs: 3_600_000,
+			maxRules: 20,
+		},
 		compaction: {
 			enabled: true,
 			thresholdRatio: 0.8,
@@ -89,6 +124,7 @@ export const ErrorImprovementSettingsSchema = z.object({
 	mode: z.union(["assist", "strict"] as const).default("assist"),
 	maxLessons: z.number().min(1).max(50).default(5),
 	maxChars: z.number().min(500).max(50_000).default(6000),
+	maxRecipes: z.number().min(1).max(20).default(3),
 	lessons: z
 		.array(
 			z.object({
@@ -104,6 +140,36 @@ export const ErrorImprovementSettingsSchema = z.object({
 		)
 		.max(200)
 		.default([]),
+	recipes: z
+		.array(
+			z.object({
+				id: z.string().min(1).max(200),
+				title: z.string().max(300),
+				problem: z.string().max(2000),
+				solution: z.string().max(4000),
+				scope: z.string().max(500).default(""),
+				keywords: z.string().max(1000).default(""),
+				confirmed: z.boolean().default(false),
+				enabled: z.boolean().default(true),
+			}),
+		)
+		.max(200)
+		.default([]),
+	enforcement: z
+		.object({
+			enabled: z.boolean().default(true),
+			threshold: z.number().min(2).max(10).default(3),
+			defaultMode: z.union(["warn", "deny"] as const).default("warn"),
+			warnCooldownMs: z.number().min(60_000).max(86_400_000).default(3_600_000),
+			maxRules: z.number().min(1).max(100).default(20),
+		})
+		.default({
+			enabled: true,
+			threshold: 3,
+			defaultMode: "warn",
+			warnCooldownMs: 3_600_000,
+			maxRules: 20,
+		}),
 	compaction: z
 		.object({
 			enabled: z.boolean().default(true),
@@ -197,7 +263,7 @@ export function relevanceScore(lesson: ErrorLesson, query: string): number {
 	return score;
 }
 
-function safeField(value: string | undefined, maxLength = 2000): string {
+export function safeField(value: string | undefined, maxLength = 2000): string {
 	const withoutControls = Array.from(value ?? "")
 		.filter((character) => {
 			const code = character.codePointAt(0) ?? 0;

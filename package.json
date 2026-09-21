@@ -1,6 +1,6 @@
 {
   "name": "dsh-error-improvement",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "Configurable user-confirmed lessons that help DeepSeek Harness avoid repeating mistakes.",
   "keywords": [
     "deepseek-harness",
