@@ -195,10 +195,11 @@ export function mountCapture(
 		): void;
 		on(
 			event: "agent/turn-stopping",
-			listener: (
-				payload: { agent?: { session?: SessionLike } },
-				next: () => Promise<unknown>,
-			) => unknown,
+			listener: (payload: {
+				agent?: { session?: SessionLike };
+				turn?: number;
+				signal?: AbortSignal;
+			}) => unknown,
 		): void;
 	};
 
@@ -213,8 +214,9 @@ export function mountCapture(
 		}
 	});
 
-	events.on("agent/turn-stopping", async (payload, next) => {
-		const result = await next();
+	// `agent/turn-stopping` is a serial hook: the payload is { agent, turn, signal }
+	// and there is NO `next` argument. Calling one aborts the agent turn.
+	events.on("agent/turn-stopping", (payload) => {
 		try {
 			const session = payload.agent?.session;
 			if (session && getConfig().capture.enabled !== false) {
@@ -225,7 +227,6 @@ export function mountCapture(
 				`dsh-error-improvement: capture finalize failed open: ${String(error)}`,
 			);
 		}
-		return result;
 	});
 
 	events.on("session/disposed", (session) => {

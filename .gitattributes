@@ -1,0 +1,9 @@
+# Pin line endings: this repo is formatted by biome (default lineEnding: lf).
+# Without this, core.autocrlf=true on Windows rewrites the worktree to CRLF and
+# `npm run lint` fails on every file.
+* text=auto eol=lf
+
+*.png binary
+*.jpg binary
+*.gif binary
+*.ico binary

@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.1
+
+- **Fix (critical): `agent/turn-stopping` handler no longer calls a non-existent `next`.** That hook is *serial* — the host dispatches it with the payload `{ agent, turn, signal }` only (see `dsh-tool-cordis` api-catalog: `'agent/turn-stopping'(payload): Promise<void> | void`). 0.3.0 declared it as a waterfall (`async (payload, next) => await next()`), so every turn end threw `TypeError: next is not a function`, which the agent runtime reported as `agent turn failed`. The handler is now synchronous and fully fail-open.
+- **Fix: `/error-improvement` RPC actually registers.** `connection.rpc.handle()` mounts its route through the *reading* context (`owner.effect(() => owner.webServer.register(route))` in `@deepseek-ai/dsh-client-connection`), so the inject scope must include `webServer`. 0.3.0 injected only `connection`, which made cordis throw `cannot get property "webServer" without inject` inside `apply()` — the plugin fork died, the settings page stayed on "无法连接 Host", and the half-mounted hooks kept running. The scope is now `ctx.inject(["connection", "webServer"], …)` with an inner try/catch so a missing service degrades to a warning instead of killing the plugin.
+
 ## 0.3.0
 
 - **Breaking: compaction wrapper removed.** This plugin no longer ships a context-compaction engine; use the official `compaction-basic` plugin instead (configure it via `~/.dsh/profiles/<profile>/cordis.patch.yml`). This removes the `summarization*` / `thresholdRatio` / `modelPolicies` settings surface.

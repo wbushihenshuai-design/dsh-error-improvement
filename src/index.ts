@@ -216,9 +216,19 @@ export function apply(ctx: Context, config: unknown): void {
 	}
 
 	// ── client RPC for the settings-page drafts section ─────────────────────
+	// `connection.rpc.handle` registers its route through the READING context
+	// (`owner.webServer.register(route)` in @deepseek-ai/dsh-client-connection),
+	// so `webServer` must be in this inject scope or cordis throws
+	// `cannot get property "webServer" without inject`.
 	try {
-		ctx.inject(["connection"], (injected) => {
-			registerRpc(injected, store);
+		ctx.inject(["connection", "webServer"], (injected) => {
+			try {
+				registerRpc(injected, store);
+			} catch (error) {
+				ctx.logger.warn(
+					`${PLUGIN_NAME}: rpc registration failed open: ${String(error)}`,
+				);
+			}
 		});
 	} catch (error) {
 		ctx.logger.warn(
