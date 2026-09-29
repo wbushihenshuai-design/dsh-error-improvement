@@ -1,10 +1,19 @@
-/** Standalone DSH host plugin for user-confirmed anti-regression lessons. */
+/**
+ * dsh-error-improvement — self-evolution entry point (v0.3.0, DSH 2.0.15+).
+ *
+ * Layers:
+ *  - injection   agent/pre-step: relevant confirmed lessons/recipes into context
+ *  - enforcement tools/*-execute: statistical interception of repeated errors
+ *  - capture     session/event: zero-LLM candidate queue
+ *  - signals     hit tracking → maturity → graduation proposals
+ *  - distill     LLM Curator→Writer → drafts/ (user confirms each)
+ *  - rpc/tools   drafts review for the settings page and the agent
+ *
+ * Every layer fails open; nothing reaches memory without the confirmation gate.
+ */
 import type { Context } from "@deepseek-ai/cordis";
-import type { PreStepDecision } from "@deepseek-ai/dsh-agent";
-import { type ErrorImprovementSettings, ErrorImprovementSettingsSchema, type SuccessRecipe } from "./lessons.js";
+import { Config } from "./config.js";
 export declare const name = "dsh-error-improvement";
+export { Config };
 export declare const inject: string[];
-export { ErrorImprovementSettingsSchema };
-export type { ErrorImprovementSettings };
-export declare function improveDecision(decision: PreStepDecision, aborted: boolean, settings: ErrorImprovementSettings, runtimeRecipes?: readonly SuccessRecipe[]): PreStepDecision;
-export declare function apply(ctx: Context): void;
+export declare function apply(ctx: Context, config: unknown): void;

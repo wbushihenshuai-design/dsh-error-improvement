@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.3.0
+
+- **Breaking: compaction wrapper removed.** This plugin no longer ships a context-compaction engine; use the official `compaction-basic` plugin instead (configure it via `~/.dsh/profiles/<profile>/cordis.patch.yml`). This removes the `summarization*` / `thresholdRatio` / `modelPolicies` settings surface.
+- **Breaking: settings migration to DSH 2.0.15.** The plugin now declares its configuration as a Schemastery `Config` schema consumed from `cordis.patch.yml`; the legacy `settings.installSection` / `settings.register` integration (removed by the 2.0.15 host) is gone. **Legacy `~/.dsh/settings.yaml` values are *not* auto-migrated into `cordis.patch.yml`** — defaults apply until you reconfigure there; only *data* is migrated.
+- **New: agent memory layer ("never repeat a mistake").** Markdown-native memory directory at `$DSH_HOME/error-improvement/memory/` (`lessons.md`, `recipes.md`, `decisions.md`, `candidates.jsonl`, `drafts/`) — atomic tmp+rename writes, fail-open everywhere. Legacy v1 `state.json` (errors/promotions/recipes) and the old `error-improvement:` settings section are imported automatically on first run.
+- **New: auto-capture + LLM distillation (assist mode).** Zero-LLM capture of tool errors and turn outcomes (skipped for delegated sessions, capped per session) feeds a two-stage Curator→Writer distillation that proposes *draft* entries. **Every draft requires explicit user confirmation** before it becomes memory — nothing writes to memory silently (the agent-invoked `improve_record_recipe` tool, which records an already-verified solution, is the deliberate exception).
+- **New: draft review UI + RPC.** A settings-page section ("待确认草稿" / pending drafts) lists drafts with approve/reject; an agent-facing `improve_review_drafts` tool and a `/error-improvement` RPC channel (`drafts.list|get|approve|reject|update`, `memory.stats`) back it.
+- **New: turn-signal maturity + skill graduation.** Presented entries that coincided with a successful, non-regressing turn gain `hits`; maturity evolves `draft → validated (≥2) → core (≥5)`. Entries crossing the graduation threshold (`graduation.minHits`, default 3) are auto-*proposed* as skills — again confirmation-gated — and on approval are written as `$DSH_HOME/skills/<slug>/SKILL.md` (agentskills.io-style frontmatter; refuses to overwrite existing files).
+- **Enforcement keeps working on 2.0.15.** Error-signature statistics, warn/deny promotion rules, and cooldown interception are unchanged in behavior, with all hooks mounted via structural event casts and fail-open guards.
+- **Tests/CI**: 32 node:test cases covering store/lessons/recipes/enforcement/drafts/signals/graduation/host-apply; biome lint, `tsc` strict (incl. `noUncheckedIndexedAccess`), preflight, and pack-smoke all gate the release.
+
 ## 0.2.0
 
 - **New: enforcement loop (repeated errors become rules).** The plugin now observes `tools/post-execute` and counts identical tool failures (same tool + same normalized error signature, persisted across restarts in `$DSH_HOME/error-improvement/state.json`). When a failure crosses `enforcement.threshold` (default 3), it is promoted into a rule — linked to a matching confirmed lesson when one exists, otherwise as an auto-rule synthesized from the error.

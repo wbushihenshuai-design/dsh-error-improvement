@@ -1,4 +1,11 @@
-/** Persistent runtime state: error counters, promoted rules, success recipes. */
+/**
+ * Persistent runtime state (JSON): error statistics, promoted guard rules,
+ * distillation watermarks and one-time migration flags.
+ *
+ * Version 2 drops the embedded `recipes` list — recipes now live in the
+ * md-native memory layer. Recipes found in a legacy v1 state file are kept in
+ * the transient `legacyRecipes` field until migrate.ts moves them over.
+ */
 
 import {
 	existsSync,
@@ -7,8 +14,9 @@ import {
 	renameSync,
 	writeFileSync,
 } from "node:fs";
-import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname } from "node:path";
+
+import { legacyStateFile } from "./paths.js";
 
 export interface ErrorRecord {
 	tool: string;
@@ -31,6 +39,7 @@ export interface Promotion {
 	warnedAt?: number;
 }
 
+/** Legacy v1 shape kept only for migration. */
 export interface RuntimeRecipe {
 	id: string;
 	title: string;
@@ -40,14 +49,26 @@ export interface RuntimeRecipe {
 	keywords: string;
 	confirmed: boolean;
 	enabled: boolean;
-	createdAt: number;
+	createdAt: string;
+}
+
+export interface DistillState {
+	/** Byte offset into candidates.jsonl already processed. */
+	watermark: number;
+	lastRunAt: number;
+}
+
+export interface MigrationFlags {
+	settingsYaml: boolean;
+	stateRecipes: boolean;
 }
 
 export interface ImprovementState {
-	version: 1;
+	version: 2;
 	errors: Record<string, ErrorRecord>;
 	promotions: Promotion[];
-	recipes: RuntimeRecipe[];
+	distill: DistillState;
+	migrated: MigrationFlags;
 }
 
 export function normalizeText(value: string, max = 120): string {
@@ -64,49 +85,94 @@ export function errorSignature(tool: string, sample: string): string {
 	return `${tool}|${normalizeText(sample, 80)}`;
 }
 
-export function defaultStatePath(): string {
-	const env = process.env.DSH_HOME;
-	const home = env?.trim() ? env : join(homedir(), ".dsh");
-	return join(home, "error-improvement", "state.json");
+function emptyState(): ImprovementState {
+	return {
+		version: 2,
+		errors: {},
+		promotions: [],
+		distill: { watermark: 0, lastRunAt: 0 },
+		migrated: { settingsYaml: false, stateRecipes: false },
+	};
 }
 
-function emptyState(): ImprovementState {
-	return { version: 1, errors: {}, promotions: [], recipes: [] };
+interface LegacyStateV1 {
+	version?: number;
+	errors?: Record<string, ErrorRecord>;
+	promotions?: Promotion[];
+	recipes?: RuntimeRecipe[];
 }
 
 export class ImprovementStore {
 	readonly path: string;
-	private state: ImprovementState = emptyState();
-	private dirty = false;
+	private state: ImprovementState;
+	/** Transient: recipes recovered from a v1 file, consumed by migrate.ts. */
+	legacyRecipes: RuntimeRecipe[] = [];
 	private timer: ReturnType<typeof setTimeout> | undefined;
 
-	constructor(path = defaultStatePath()) {
+	constructor(path = legacyStateFile()) {
 		this.path = path;
-		this.load();
+		this.state = this.load();
 	}
 
-	get data(): Readonly<ImprovementState> {
+	private load(): ImprovementState {
+		try {
+			if (!existsSync(this.path)) return emptyState();
+			const raw = JSON.parse(readFileSync(this.path, "utf8")) as LegacyStateV1;
+			const state = emptyState();
+			if (raw && typeof raw === "object") {
+				if (raw.errors && typeof raw.errors === "object")
+					state.errors = raw.errors;
+				if (Array.isArray(raw.promotions)) state.promotions = raw.promotions;
+				const distill = (raw as { distill?: DistillState }).distill;
+				if (distill && typeof distill === "object") {
+					if (Number.isFinite(distill.watermark))
+						state.distill.watermark = distill.watermark;
+					if (Number.isFinite(distill.lastRunAt))
+						state.distill.lastRunAt = distill.lastRunAt;
+				}
+				const migrated = (raw as { migrated?: MigrationFlags }).migrated;
+				if (migrated && typeof migrated === "object") {
+					state.migrated.settingsYaml = migrated.settingsYaml === true;
+					state.migrated.stateRecipes = migrated.stateRecipes === true;
+				}
+				if ((raw.version ?? 1) < 2 && Array.isArray(raw.recipes)) {
+					this.legacyRecipes = raw.recipes;
+				}
+			}
+			return state;
+		} catch {
+			// fail-open: a corrupt state file must never block plugin boot
+			return emptyState();
+		}
+	}
+
+	get data(): ImprovementState {
 		return this.state;
 	}
 
-	private load(): void {
+	flush(): void {
+		if (this.timer) {
+			clearTimeout(this.timer);
+			this.timer = undefined;
+		}
 		try {
-			if (!existsSync(this.path)) return;
-			const parsed = JSON.parse(
-				readFileSync(this.path, "utf8"),
-			) as Partial<ImprovementState>;
-			if (!parsed || typeof parsed !== "object") return;
-			this.state = {
-				version: 1,
-				errors:
-					parsed.errors && typeof parsed.errors === "object"
-						? parsed.errors
-						: {},
-				promotions: Array.isArray(parsed.promotions) ? parsed.promotions : [],
-				recipes: Array.isArray(parsed.recipes) ? parsed.recipes : [],
-			};
+			mkdirSync(dirname(this.path), { recursive: true });
+			const tmp = `${this.path}.tmp-${process.pid}`;
+			writeFileSync(tmp, JSON.stringify(this.state, null, 2), "utf8");
+			renameSync(tmp, this.path);
 		} catch {
-			// Fail-open: a corrupt state file must never break the host.
+			// fail-open
+		}
+	}
+
+	scheduleSave(): void {
+		if (this.timer) return;
+		this.timer = setTimeout(() => this.flush(), 250);
+		if (
+			typeof this.timer === "object" &&
+			typeof this.timer.unref === "function"
+		) {
+			this.timer.unref();
 		}
 	}
 
@@ -118,46 +184,51 @@ export class ImprovementStore {
 		const signature = errorSignature(tool, sample);
 		const now = Date.now();
 		const existing = this.state.errors[signature];
-		const record: ErrorRecord = existing
-			? {
-					...existing,
-					count: existing.count + 1,
-					lastAt: now,
-					sample: sample.slice(0, 300),
-					argsHint: argsHint || existing.argsHint,
-				}
-			: {
-					tool,
-					argsHint,
-					count: 1,
-					firstAt: now,
-					lastAt: now,
-					sample: sample.slice(0, 300),
-				};
+		if (existing) {
+			existing.count += 1;
+			existing.lastAt = now;
+			existing.sample = sample.slice(0, 300);
+			this.scheduleSave();
+			return { signature, record: existing };
+		}
+		const record: ErrorRecord = {
+			tool,
+			argsHint,
+			count: 1,
+			firstAt: now,
+			lastAt: now,
+			sample: sample.slice(0, 300),
+		};
 		this.state.errors[signature] = record;
 		this.scheduleSave();
 		return { signature, record };
 	}
 
 	findPromotion(signature: string): Promotion | undefined {
-		return this.state.promotions.find(
-			(promotion) => promotion.signature === signature,
-		);
+		return this.state.promotions.find((rule) => rule.signature === signature);
 	}
 
-	promote(entry: Omit<Promotion, "promotedAt">, maxRules: number): Promotion {
-		const existing = this.findPromotion(entry.signature);
+	promote(rule: Omit<Promotion, "promotedAt">, maxRules: number): Promotion {
+		const existing = this.findPromotion(rule.signature);
 		if (existing) return existing;
-		const promotion: Promotion = { ...entry, promotedAt: Date.now() };
+		const promotion: Promotion = { ...rule, promotedAt: Date.now() };
 		this.state.promotions.push(promotion);
-		// Evict oldest lesson-less auto-rules beyond the cap; lesson-linked
-		// rules are user-curated knowledge and never auto-evicted.
-		while (this.state.promotions.length > Math.max(1, maxRules)) {
-			const index = this.state.promotions.findIndex(
-				(candidate) => !candidate.lessonId,
+		// Evict oldest auto-rules (those not linked to a memory lesson) beyond the cap.
+		const auto = this.state.promotions.filter(
+			(candidate) => !candidate.lessonId,
+		);
+		const overflow = this.state.promotions.length - Math.max(1, maxRules);
+		if (overflow > 0) {
+			const evict = new Set(
+				auto
+					.slice()
+					.sort((left, right) => left.promotedAt - right.promotedAt)
+					.slice(0, overflow)
+					.map((candidate) => candidate.signature),
 			);
-			if (index < 0) break;
-			this.state.promotions.splice(index, 1);
+			this.state.promotions = this.state.promotions.filter(
+				(candidate) => !evict.has(candidate.signature),
+			);
 		}
 		this.scheduleSave();
 		return promotion;
@@ -168,54 +239,5 @@ export class ImprovementStore {
 		if (!promotion) return;
 		promotion.warnedAt = Date.now();
 		this.scheduleSave();
-	}
-
-	addRecipe(input: {
-		title: string;
-		problem: string;
-		solution: string;
-		scope?: string;
-		keywords?: string;
-	}): RuntimeRecipe {
-		const now = Date.now();
-		const id = `recipe-${now.toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
-		const recipe: RuntimeRecipe = {
-			id,
-			title: input.title.slice(0, 300),
-			problem: input.problem.slice(0, 2000),
-			solution: input.solution.slice(0, 4000),
-			scope: (input.scope ?? "").slice(0, 500),
-			keywords: (input.keywords ?? "").slice(0, 1000),
-			confirmed: true,
-			enabled: true,
-			createdAt: now,
-		};
-		this.state.recipes.push(recipe);
-		this.scheduleSave();
-		return recipe;
-	}
-
-	flush(): void {
-		if (this.timer) {
-			clearTimeout(this.timer);
-			this.timer = undefined;
-		}
-		if (!this.dirty) return;
-		this.dirty = false;
-		try {
-			mkdirSync(dirname(this.path), { recursive: true });
-			const tmp = `${this.path}.tmp`;
-			writeFileSync(tmp, JSON.stringify(this.state, null, 2));
-			renameSync(tmp, this.path);
-		} catch {
-			// Fail-open: persistence problems must never break the host.
-		}
-	}
-
-	private scheduleSave(): void {
-		this.dirty = true;
-		if (this.timer) return;
-		this.timer = setTimeout(() => this.flush(), 250);
-		this.timer.unref?.();
 	}
 }

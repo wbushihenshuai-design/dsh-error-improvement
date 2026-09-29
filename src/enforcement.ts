@@ -1,84 +1,79 @@
 /**
- * Enforcement loop: observe repeated tool failures, promote them into rules,
- * and intercept matching future calls before they execute.
+ * Runtime enforcement: statistics-driven interception of repeated tool errors.
+ *
+ * post-execute: identical tool errors are counted by signature; at the
+ * configured threshold a guard rule is promoted (linked to the best matching
+ * memory lesson when one exists).
+ * pre-execute: a promoted rule either warns once per cooldown or denies.
+ * Every listener fails open.
  */
 
 import type { Context } from "@deepseek-ai/cordis";
-import type { ContentBlock } from "@deepseek-ai/dsh-llm";
 
-import {
-	blocksToText,
-	type ErrorImprovementSettings,
-	type ErrorLesson,
-	PLUGIN_NAME,
-	relevanceScore,
-} from "./lessons.js";
+import type { PluginConfig } from "./config.js";
+import { blocksToText, type ContentBlock, relevanceScore } from "./lessons.js";
+import type { MemoryEntry } from "./memory.js";
 import {
 	type ImprovementStore,
 	normalizeText,
 	type Promotion,
 } from "./store.js";
 
-export interface ToolExecLike {
+interface ToolExecLike {
 	name?: unknown;
-	arguments?: unknown;
+	parameters?: unknown;
+	args?: unknown;
+	input?: unknown;
 }
 
-export interface ToolResultLike {
-	isError?: unknown;
+interface ToolResultLike {
+	isError?: boolean;
+	content?: ContentBlock[];
 	error?: unknown;
-	content?: unknown;
 }
 
-export type PreToolDecisionLike =
-	| { kind: "allow" }
-	| { kind: "deny"; reason: string }
-	| { kind: "ask"; reason?: string };
+interface PreToolDecisionLike {
+	kind: "allow" | "deny" | string;
+	reason?: string;
+	[key: string]: unknown;
+}
 
 export function argsTextOf(exec: ToolExecLike): string {
-	if (exec.arguments == null) return "";
+	const raw = exec.parameters ?? exec.args ?? exec.input;
+	if (raw === undefined || raw === null) return "";
 	try {
-		return JSON.stringify(exec.arguments).slice(0, 400);
+		return JSON.stringify(raw).slice(0, 400);
 	} catch {
-		return String(exec.arguments).slice(0, 400);
+		return String(raw).slice(0, 400);
 	}
 }
 
 export function errorSample(result: ToolResultLike): string {
 	const parts: string[] = [];
-	const failure = result.error as { message?: unknown } | undefined;
-	if (failure && typeof failure.message === "string") {
-		parts.push(failure.message);
-	} else if (result.error != null) {
-		parts.push(String(result.error));
-	}
-	const text = blocksToText(result.content as ContentBlock[] | undefined);
+	if (result.error instanceof Error) parts.push(result.error.message);
+	else if (typeof result.error === "string") parts.push(result.error);
+	const text = blocksToText(result.content);
 	if (text) parts.push(text);
-	return parts.join(" ").slice(0, 300);
+	return parts.join("\n").slice(0, 300);
 }
 
-function tokenSet(value: string): Set<string> {
-	const result = new Set<string>();
-	for (const token of normalizeText(value, 400).split(" ")) {
-		if (token.length >= 3) result.add(token);
-	}
-	return result;
+function tokenSet(text: string): Set<string> {
+	return new Set(
+		normalizeText(text, 400)
+			.split(" ")
+			.filter((token) => token.length >= 2),
+	);
 }
 
-export function argsOverlap(current: string, recorded: string): number {
-	const currentNorm = normalizeText(current, 400);
-	const recordedNorm = normalizeText(recorded, 400);
-	if (!currentNorm && !recordedNorm) return 1;
-	if (!currentNorm || !recordedNorm) return 0;
-	const a = tokenSet(currentNorm);
-	const b = tokenSet(recordedNorm);
+export function argsOverlap(left: string, right: string): number {
+	const a = tokenSet(left);
+	const b = tokenSet(right);
 	if (a.size === 0 || b.size === 0) return 0;
-	let hit = 0;
-	for (const token of a) if (b.has(token)) hit += 1;
-	return hit / Math.max(a.size, b.size);
+	let intersection = 0;
+	for (const token of a) if (b.has(token)) intersection += 1;
+	return intersection / Math.max(a.size, b.size);
 }
 
-/** Find the strongest promoted rule matching this upcoming call. */
 export function matchPromotion(
 	promotions: readonly Promotion[],
 	tool: string,
@@ -88,10 +83,10 @@ export function matchPromotion(
 	let bestScore = 0;
 	for (const promotion of promotions) {
 		if (promotion.tool !== tool) continue;
-		const score = argsOverlap(argsText, promotion.argsHint);
-		if (score >= 0.34 && score > bestScore) {
+		const overlap = argsOverlap(argsText, promotion.argsHint);
+		if (overlap >= 0.34 && overlap > bestScore) {
 			best = promotion;
-			bestScore = score;
+			bestScore = overlap;
 		}
 	}
 	return best;
@@ -103,29 +98,25 @@ export interface GuardOutcome {
 }
 
 export function guardDecision(
-	promotion: Promotion | undefined,
-	settings: ErrorImprovementSettings,
+	promotion: Promotion,
+	config: PluginConfig,
 	now: number,
 ): GuardOutcome {
-	if (!promotion) return { decision: { kind: "allow" }, warned: false };
 	if (promotion.mode === "deny") {
 		return {
 			decision: {
 				kind: "deny",
-				reason: `Hard anti-regression rule: ${promotion.reason}`,
+				reason: `Blocked by error-improvement rule: ${promotion.reason}`,
 			},
 			warned: false,
 		};
 	}
-	const cooldown =
-		typeof settings.enforcement?.warnCooldownMs === "number"
-			? settings.enforcement.warnCooldownMs
-			: 3_600_000;
-	if (!promotion.warnedAt || now - promotion.warnedAt > cooldown) {
+	const cooldown = config.enforcement.warnCooldownMs;
+	if (!promotion.warnedAt || now - promotion.warnedAt >= cooldown) {
 		return {
 			decision: {
 				kind: "deny",
-				reason: `Anti-regression reminder (this call is intercepted once as a warning; retrying immediately is allowed): ${promotion.reason}`,
+				reason: `Anti-regression reminder (intercepted once as a warning; retrying immediately is allowed): ${promotion.reason}`,
 			},
 			warned: true,
 		};
@@ -134,12 +125,12 @@ export function guardDecision(
 }
 
 function bestMatchingLesson(
-	settings: ErrorImprovementSettings,
+	lessons: readonly MemoryEntry[],
 	query: string,
-): ErrorLesson | undefined {
-	let best: ErrorLesson | undefined;
+): MemoryEntry | undefined {
+	let best: MemoryEntry | undefined;
 	let bestScore = 0;
-	for (const lesson of settings.lessons ?? []) {
+	for (const lesson of lessons) {
 		if (lesson.enabled === false || lesson.confirmed !== true) continue;
 		const score = relevanceScore(lesson, query);
 		if (score >= 3 && score > bestScore) {
@@ -153,11 +144,11 @@ function bestMatchingLesson(
 export function observeToolResult(
 	exec: ToolExecLike,
 	result: ToolResultLike,
-	settings: ErrorImprovementSettings,
+	config: PluginConfig,
 	store: ImprovementStore,
+	lessons: readonly MemoryEntry[],
 ): void {
-	if (settings.enabled === false || settings.enforcement?.enabled === false)
-		return;
+	if (config.enabled === false || config.enforcement.enabled === false) return;
 	if (!result || result.isError !== true) return;
 	const tool = typeof exec.name === "string" ? exec.name : "";
 	if (!tool) return;
@@ -166,14 +157,15 @@ export function observeToolResult(
 
 	const argsHint = normalizeText(argsTextOf(exec), 160);
 	const { signature, record } = store.recordError(tool, argsHint, sample);
-	const threshold =
-		typeof settings.enforcement?.threshold === "number"
-			? settings.enforcement.threshold
-			: 3;
-	if (record.count < threshold || store.findPromotion(signature)) return;
+	if (
+		record.count < config.enforcement.threshold ||
+		store.findPromotion(signature)
+	) {
+		return;
+	}
 
-	const lesson = bestMatchingLesson(settings, `${tool} ${sample}`);
-	const mode = settings.enforcement?.defaultMode ?? "warn";
+	const lesson = bestMatchingLesson(lessons, `${tool} ${sample}`);
+	const mode = config.enforcement.defaultMode;
 	const reason = lesson
 		? `Rule "${lesson.title}": ${lesson.prevention} (the same tool error has now occurred ${record.count} times; this interception prevents a repeat.)`
 		: `Tool ${tool} has failed ${record.count} times with the same error: ${sample.slice(0, 160)}. Do not repeat the call as-is; change approach first (adjust arguments, switch tools, or verify prerequisites).`;
@@ -187,9 +179,7 @@ export function observeToolResult(
 			reason,
 			count: record.count,
 		},
-		typeof settings.enforcement?.maxRules === "number"
-			? settings.enforcement.maxRules
-			: 20,
+		config.enforcement.maxRules,
 	);
 }
 
@@ -216,17 +206,20 @@ interface ToolEvents {
 
 export function mountEnforcement(
 	ctx: Context,
-	currentSettings: () => ErrorImprovementSettings,
+	getConfig: () => PluginConfig,
+	getLessons: () => MemoryEntry[],
 	store: ImprovementStore,
+	onToolError?: (exec: ToolExecLike, result: ToolResultLike) => void,
 ): void {
 	const events = ctx as unknown as ToolEvents;
 	events.on("tools/post-execute", async (exec, result, next) => {
 		const decision = await next();
 		try {
-			observeToolResult(exec, result, currentSettings(), store);
+			observeToolResult(exec, result, getConfig(), store, getLessons());
+			if (result?.isError === true) onToolError?.(exec, result);
 		} catch (error) {
 			ctx.logger.warn(
-				`${PLUGIN_NAME}: enforcement observer failed open: ${String(error)}`,
+				`dsh-error-improvement: enforcement observer failed open: ${String(error)}`,
 			);
 		}
 		return decision;
@@ -235,9 +228,10 @@ export function mountEnforcement(
 	events.on("tools/pre-execute", async (exec, next) => {
 		const decision = await next();
 		try {
-			const settings = currentSettings();
-			if (settings.enabled === false || settings.enforcement?.enabled === false)
+			const config = getConfig();
+			if (config.enabled === false || config.enforcement.enabled === false) {
 				return decision;
+			}
 			if (decision.kind !== "allow") return decision;
 			const tool = typeof exec.name === "string" ? exec.name : "";
 			if (!tool) return decision;
@@ -247,12 +241,12 @@ export function mountEnforcement(
 				argsTextOf(exec),
 			);
 			if (!promotion) return decision;
-			const outcome = guardDecision(promotion, settings, Date.now());
+			const outcome = guardDecision(promotion, config, Date.now());
 			if (outcome.warned) store.markWarned(promotion.signature);
 			return outcome.decision;
 		} catch (error) {
 			ctx.logger.warn(
-				`${PLUGIN_NAME}: enforcement guard failed open: ${String(error)}`,
+				`dsh-error-improvement: enforcement guard failed open: ${String(error)}`,
 			);
 			return decision;
 		}

@@ -2,150 +2,162 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import test from "node:test";
+import { after, before, test } from "node:test";
 
-import {
-	argsOverlap,
-	guardDecision,
-	matchPromotion,
-	observeToolResult,
-} from "../src/enforcement.js";
-import { ImprovementStore, type Promotion } from "../src/store.js";
+let home = "";
 
-function tempStore(): { store: ImprovementStore; cleanup: () => void } {
-	const dir = mkdtempSync(join(tmpdir(), "dsh-ei-test-"));
-	const store = new ImprovementStore(join(dir, "state.json"));
-	return {
-		store,
-		cleanup: () => rmSync(dir, { recursive: true, force: true }),
+before(() => {
+	home = mkdtempSync(join(tmpdir(), "dsh-ei-enforce-"));
+	process.env.DSH_HOME = home;
+});
+
+after(() => {
+	rmSync(home, { recursive: true, force: true });
+});
+
+type Handler = (...args: never[]) => unknown;
+
+async function harness() {
+	const { unwrapConfig } = await import("../src/config.js");
+	const { ImprovementStore } = await import("../src/store.js");
+	const { mountEnforcement } = await import("../src/enforcement.js");
+	const config = unwrapConfig({});
+	const store = new ImprovementStore(join(home, `state-${Math.random()}.json`));
+	const handlers = new Map<string, Handler>();
+	const ctx = {
+		logger: { warn: () => {} },
+		on(event: string, listener: Handler) {
+			handlers.set(event, listener);
+		},
 	};
+	mountEnforcement(
+		ctx as never,
+		() => config,
+		() => [],
+		store,
+	);
+	return { config, store, handlers };
 }
 
-const failureResult = {
-	isError: true,
-	error: { message: "ENOENT: no such file or directory" },
-	content: [{ type: "text", text: "read failed" }],
-};
+function execLike(name: string, args: Record<string, unknown>) {
+	return { name, args };
+}
 
-const pwshExec = {
-	name: "pwsh",
-	arguments: { command: "Get-Content missing.txt", description: "read file" },
-};
+const allow = () => Promise.resolve({ kind: "allow" as const });
 
-test("argsOverlap treats two empty argument sets as identical", () => {
-	assert.equal(argsOverlap("", ""), 1);
-	assert.equal(argsOverlap("{}", ""), 0);
-	assert.equal(argsOverlap("some command here", ""), 0);
-});
-
-test("argsOverlap scores shared tokens", () => {
-	const recorded = '{"command":"get-content missing.txt"}';
-	const similar = '{"command":"Get-Content missing.txt","description":"x"}';
-	const different = '{"command":"Get-Process"}';
-	assert.ok(argsOverlap(similar, recorded) >= 0.34);
-	assert.ok(argsOverlap(different, recorded) < 0.34);
-});
-
-test("matchPromotion only matches same tool with overlapping args", () => {
-	const promotion: Promotion = {
-		signature: "pwsh|enoent",
-		tool: "pwsh",
-		argsHint: '{"command":"get-content missing.txt"}',
-		mode: "warn",
-		reason: "stop repeating",
-		count: 3,
-		promotedAt: 1,
-	};
-	assert.equal(
-		matchPromotion([promotion], "pwsh", '{"command":"Get-Content missing.txt"}')
-			?.signature,
-		"pwsh|enoent",
+test("pre-execute warns once per cooldown for a matching promotion", async () => {
+	const { config, store, handlers } = await harness();
+	// argsHint mirrors the JSON-serialized args of the original failing call.
+	const argsHint = JSON.stringify({ command: "npm ci" });
+	const promotion = store.promote(
+		{
+			signature: "sig-a",
+			tool: "run_command",
+			argsHint,
+			lessonId: "lesson-a",
+			mode: "warn",
+			reason: "test",
+			count: 3,
+		},
+		10,
 	);
-	assert.equal(
-		matchPromotion([promotion], "read", '{"command":"Get-Content"}'),
-		undefined,
+	const pre = handlers.get("tools/pre-execute") as unknown as (
+		exec: unknown,
+		next: () => Promise<{ kind: string }>,
+	) => Promise<{ kind: string }>;
+
+	// Warn mode soft-denies once per cooldown window.
+	const first = await pre(
+		execLike("run_command", { command: "npm ci" }),
+		allow,
 	);
-	assert.equal(
-		matchPromotion([promotion], "pwsh", '{"command":"Get-Process"}'),
-		undefined,
+	assert.equal(first.kind, "deny");
+	assert.ok((store.data.promotions[0]?.warnedAt ?? 0) > 0);
+
+	const second = await pre(
+		execLike("run_command", { command: "npm ci" }),
+		allow,
 	);
+	assert.equal(second.kind, "allow", "cooldown suppresses repeat warnings");
+
+	config.enforcement.defaultMode = "deny";
+	promotion.mode = "deny";
+	const third = await pre(
+		execLike("run_command", { command: "npm ci" }),
+		allow,
+	);
+	assert.equal(third.kind, "deny");
 });
 
-test("observeToolResult promotes a rule exactly at the threshold", () => {
-	const { store, cleanup } = tempStore();
-	try {
-		const settings = { enforcement: { threshold: 3 } };
-		for (let index = 0; index < 2; index += 1) {
-			observeToolResult(pwshExec, failureResult, settings, store);
-		}
-		assert.equal(store.data.promotions.length, 0);
-		observeToolResult(pwshExec, failureResult, settings, store);
-		assert.equal(store.data.promotions.length, 1);
-		// Further failures do not duplicate the rule.
-		observeToolResult(pwshExec, failureResult, settings, store);
-		assert.equal(store.data.promotions.length, 1);
-		assert.equal(store.data.promotions[0]?.mode, "warn");
-	} finally {
-		cleanup();
-	}
+test("pre-execute passes through when disabled", async () => {
+	const { config, store, handlers } = await harness();
+	config.enforcement.enabled = false;
+	store.promote(
+		{
+			signature: "sig-b",
+			tool: "edit",
+			argsHint: "",
+			mode: "warn",
+			reason: "r",
+			count: 3,
+		},
+		10,
+	);
+	const pre = handlers.get("tools/pre-execute") as unknown as (
+		exec: unknown,
+		next: () => Promise<{ kind: string }>,
+	) => Promise<{ kind: string }>;
+	const decision = await pre(execLike("edit", { file_path: "a" }), allow);
+	assert.equal(decision.kind, "allow");
 });
 
-test("observeToolResult ignores successes and disabled enforcement", () => {
-	const { store, cleanup } = tempStore();
-	try {
-		observeToolResult(pwshExec, { isError: false, content: [] }, {}, store);
-		observeToolResult(pwshExec, failureResult, { enabled: false }, store);
-		observeToolResult(
-			pwshExec,
-			failureResult,
-			{ enforcement: { enabled: false } },
-			store,
+test("post-execute records error stats and promotes at the threshold", async () => {
+	const { store, handlers } = await harness();
+	const post = handlers.get("tools/post-execute") as unknown as (
+		exec: unknown,
+		result: unknown,
+		next: () => Promise<{ kind: string }>,
+	) => Promise<unknown>;
+	for (let index = 0; index < 3; index += 1) {
+		await post(
+			execLike("run_command", { command: "npm ci" }),
+			{ isError: true, content: [{ type: "text", text: "ETARGET not found" }] },
+			allow,
 		);
-		assert.equal(Object.keys(store.data.errors).length, 0);
-	} finally {
-		cleanup();
 	}
-});
-
-test("guardDecision warns once then allows within the cooldown", () => {
-	const promotion: Promotion = {
-		signature: "pwsh|enoent",
-		tool: "pwsh",
-		argsHint: "",
-		mode: "warn",
-		reason: "stop repeating",
-		count: 3,
-		promotedAt: 1,
-	};
-	const first = guardDecision(promotion, {}, 10_000);
-	assert.equal(first.decision.kind, "deny");
-	assert.equal(first.warned, true);
-	const warnedPromotion = { ...promotion, warnedAt: 10_000 };
-	const second = guardDecision(warnedPromotion, {}, 20_000);
-	assert.equal(second.decision.kind, "allow");
-	const afterCooldown = guardDecision(
-		warnedPromotion,
-		{ enforcement: { warnCooldownMs: 60_000 } },
-		10_000 + 61_000,
+	const records = Object.values(store.data.errors);
+	assert.equal(records.length, 1);
+	assert.equal(records[0]?.count, 3);
+	assert.equal(
+		store.data.promotions.length,
+		1,
+		"threshold reached -> promotion",
 	);
-	assert.equal(afterCooldown.decision.kind, "deny");
 });
 
-test("guardDecision deny mode always blocks", () => {
-	const promotion: Promotion = {
-		signature: "pwsh|enoent",
-		tool: "pwsh",
-		argsHint: "",
-		mode: "deny",
-		reason: "never do this",
-		count: 5,
-		promotedAt: 1,
-		warnedAt: 9_000,
+test("enforcement fails open when the guard throws", async () => {
+	const { ImprovementStore } = await import("../src/store.js");
+	const { mountEnforcement } = await import("../src/enforcement.js");
+	const store = new ImprovementStore(join(home, "state-f.json"));
+	const handlers = new Map<string, Handler>();
+	const ctx = {
+		logger: { warn: () => {} },
+		on(event: string, listener: Handler) {
+			handlers.set(event, listener);
+		},
 	};
-	const outcome = guardDecision(promotion, {}, 10_000);
-	assert.equal(outcome.decision.kind, "deny");
-	assert.equal(outcome.warned, false);
-	if (outcome.decision.kind === "deny") {
-		assert.match(outcome.decision.reason, /never do this/u);
-	}
+	mountEnforcement(
+		ctx as never,
+		() => {
+			throw new Error("boom");
+		},
+		() => [],
+		store,
+	);
+	const pre = handlers.get("tools/pre-execute") as unknown as (
+		exec: unknown,
+		next: () => Promise<{ kind: string }>,
+	) => Promise<{ kind: string }>;
+	const decision = await pre(execLike("edit", {}), allow);
+	assert.equal(decision.kind, "allow");
 });

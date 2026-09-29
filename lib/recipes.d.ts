@@ -1,28 +1,23 @@
-/** Success recipes: proven solutions captured from earlier fixes. */
-import { type UserMessage } from "@deepseek-ai/dsh-llm";
-import { type ErrorImprovementSettings, type SuccessRecipe } from "./lessons.js";
-import type { ImprovementStore } from "./store.js";
-export declare function completeRecipes(recipes: readonly SuccessRecipe[]): SuccessRecipe[];
-export declare function selectRecipes(recipes: readonly SuccessRecipe[], query: string, maximum: number, strict: boolean): SuccessRecipe[];
-export declare function renderRecipes(recipes: readonly SuccessRecipe[], query: string, budget: number, maximum: number, strict: boolean): string | undefined;
-export declare function skillsRoot(): string;
-export declare function recipeSlug(title: string, fallbackId: string): string;
-/** Graduate a recipe into a standalone DSH skill file. Returns the file path. */
-export declare function graduateRecipe(recipe: SuccessRecipe): string;
-/** Combined lessons + success-recipes rendering within the shared budget. */
-export declare function renderAll(settings: ErrorImprovementSettings, query: string, runtimeRecipes?: readonly SuccessRecipe[]): string | undefined;
-/** Lesson/recipe injection message; drop-in replacement for lessonMessage. */
-export declare function improvementMessage(settings: ErrorImprovementSettings, messages: readonly UserMessage[], runtimeRecipes?: readonly SuccessRecipe[]): UserMessage | undefined;
+/**
+ * Success recipes: proven solutions captured from earlier fixes.
+ * Rendered from the md-native memory layer (kind = "recipe").
+ */
+import type { PluginConfig } from "./config.js";
+import { type Rendered } from "./lessons.js";
+import { type MemoryEntry } from "./memory.js";
+export declare function selectRecipes(entries: readonly MemoryEntry[], query: string, maximum: number, strict: boolean): MemoryEntry[];
+export declare function renderRecipes(entries: readonly MemoryEntry[], query: string, config: Pick<PluginConfig, "mode" | "maxRecipes">, budget: number): Rendered;
 export interface RecordRecipeArgs {
-    title: string;
-    problem: string;
-    solution: string;
-    scope?: string;
-    keywords?: string;
-    asSkill?: boolean;
+    title?: unknown;
+    problem?: unknown;
+    solution?: unknown;
+    scope?: unknown;
+    keywords?: unknown;
 }
-export declare function recordRecipe(store: ImprovementStore, args: RecordRecipeArgs): {
+export interface RecordRecipeResult {
     message: string;
     id: string;
-    skillPath?: string;
-};
+}
+/** Explicit agent-recorded recipe: written straight into recipes.md (confirmed). */
+export declare function recordRecipe(args: RecordRecipeArgs): RecordRecipeResult;
+export declare function loadRecipes(): MemoryEntry[];

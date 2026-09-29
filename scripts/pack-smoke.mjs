@@ -98,9 +98,12 @@ try {
 	const lessons = await import(
 		pathToFileURL(join(pkgRoot, "lib", "lessons.js")).href
 	);
+	const config = await import(
+		pathToFileURL(join(pkgRoot, "lib", "config.js")).href
+	);
 
 	assert.equal(host.name, "dsh-error-improvement");
-	assert.equal(lessons.PLUGIN_NAME, "dsh-error-improvement");
+	assert.equal(config.PLUGIN_NAME, "dsh-error-improvement");
 	assert.equal(typeof host.apply, "function");
 	assert.equal(typeof host.inject, "object");
 	assert.equal(typeof lessons.renderLessons, "function");
